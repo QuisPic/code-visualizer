@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__ · codeviz</title>
+<style>/*__STYLE__*/</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="logo">⟡</span><span id="project-name"></span></div>
+  <div class="nav-buttons">
+    <button id="btn-back" title="Back (Alt+←)">←</button>
+    <button id="btn-fwd" title="Forward (Alt+→)">→</button>
+    <button id="btn-home" title="Overview">⌂</button>
+  </div>
+  <div class="search">
+    <input id="search" type="search" placeholder="Search functions…  ( / )" autocomplete="off" spellcheck="false">
+    <ul id="search-results" class="search-results" hidden></ul>
+  </div>
+  <div class="top-right">
+    <span id="stats" class="muted"></span>
+    <button id="btn-theme" title="Toggle light/dark"><svg width="14" height="14" viewBox="0 0 16 16" style="vertical-align:-2px"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 1.5a6.5 6.5 0 0 1 0 13z" fill="currentColor"/></svg></button>
+  </div>
+</header>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="pane-title">
+      <span>Explorer</span>
+      <button id="btn-collapse-explorer" class="link-btn" title="Collapse all">collapse</button>
+    </div>
+    <ul id="explorer" class="tree explorer"></ul>
+  </aside>
+  <div class="splitter" id="split-sidebar"></div>
+  <main id="main"></main>
+</div>
+<div id="popup" class="popup" hidden></div>
+<script>const DATA = /*__DATA__*/null;</script>
+<script>/*__APP__*/</script>
+</body>
+</html>
