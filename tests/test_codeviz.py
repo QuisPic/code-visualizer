@@ -165,3 +165,26 @@ def test_changed_since(tmp_path):
     ch = {f["n"]: f.get("ch") for f in data["funcs"] if f["k"] != "toplevel"}
     assert ch == {"keep": None, "edit": "m", "fresh": "n"}
     assert data["changed"] == {"ref": "main", "functions": 2}
+def test_source_link(tmp_path):
+    import subprocess
+
+    from codeviz.project import _web_url, source_link
+
+    assert _web_url("git@github.com:me/repo.git") == ("https://github.com/me/repo", "github")
+    assert _web_url("https://user:token@gitlab.com/grp/sub/repo.git") == ("https://gitlab.com/grp/sub/repo", "gitlab")
+    assert _web_url("ssh://git@bitbucket.org:22/me/repo") == ("https://bitbucket.org/me/repo", "bitbucket")
+    assert _web_url("https://example.com/me/repo.git") is None  # unknown host: no links
+
+    def git(*args):
+        subprocess.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)
+
+    git("init", "-q")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "a.py").write_text("def f():\n    pass\n")
+    git("add", ".")
+    git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init")
+    assert source_link(tmp_path) is None  # no remote
+    git("remote", "add", "origin", "git@github.com:me/repo.git")
+    sha = subprocess.run(["git", "-C", str(tmp_path), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    assert source_link(tmp_path / "src") == f"https://github.com/me/repo/blob/{sha}/src/{{path}}#L{{line}}-L{{end}}"
+    assert build(tmp_path, "t", [], quiet=True, link="x/{path}")["link"] == "x/{path}"

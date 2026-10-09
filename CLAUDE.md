@@ -37,7 +37,8 @@ f: file index, l/e: start/end line, k: kind, code, d?: doc comment / docstring, 
 complexity (omitted when 1), calls[]}`. Each call:
 `{n: name, l: line, c: column, q?: qualifier, t?: [target ids], x?: "h"|"l"|"a"}`. With `--changed-since`, changed functions get `ch: "n"|"m"` (new / modified) and the
 top level gets `changed: {ref, functions}`. A call with
-no `t` is external. `stats` holds counts. Changing a key means changing `project.py`,
+no `t` is external. `stats` holds counts. Optional top-level `link` is a URL template (`{path}`, `{line}`,
+`{end}`) for the repo's web page, from `project.source_link()` or `--link`. Changing a key means changing `project.py`,
 `viewer/app.js` and the tests together.
 
 ## Conventions

@@ -158,7 +158,44 @@ def _parsers():
     return get
 
 
-def build(root: Path, name: str, excludes: list[str], quiet: bool = False, changed_since: str | None = None) -> dict:
+# Line-range URL formats by host; {path} is relative to the repository root.
+_LINK_STYLES = {
+    "github": "{repo}/blob/{sha}/{path}#L{line}-L{end}",
+    "gitlab": "{repo}/-/blob/{sha}/{path}#L{line}-{end}",
+    "bitbucket": "{repo}/src/{sha}/{path}#lines-{line}:{end}",
+    "gitea": "{repo}/src/commit/{sha}/{path}#L{line}-L{end}",
+}
+
+
+def _web_url(remote: str) -> tuple[str, str] | None:
+    """(https URL, link style) for a git remote on a known host, or None."""
+    m = (re.match(r"^[\w.-]+@([^:/]+):(.+)$", remote)  # git@host:owner/repo
+         or re.match(r"^(?:ssh|git|https?)://(?:[^@/]+@)?([^/:]+)(?::\d+)?/(.+)$", remote))
+    if not m:
+        return None
+    host, repo = m.group(1).lower(), m.group(2).removesuffix("/").removesuffix(".git")
+    style = next((s for s in _LINK_STYLES if s in host), "gitea" if host == "codeberg.org" else None)
+    return (f"https://{host}/{repo}", style) if style else None
+
+
+def source_link(root: Path) -> str | None:
+    """URL template ({path}, {line}, {end}) pointing at the scanned commit on the repo's web host."""
+    def git(*args: str) -> str:
+        return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True,
+                              check=True).stdout.strip()
+    try:
+        remote, sha, prefix = git("remote", "get-url", "origin"), git("rev-parse", "HEAD"), git("rev-parse", "--show-prefix")
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+    web = _web_url(remote)
+    if not web:
+        return None
+    url, style = web
+    return _LINK_STYLES[style].replace("{repo}", url).replace("{sha}", sha).replace("{path}", prefix + "{path}")
+
+
+def build(root: Path, name: str, excludes: list[str], quiet: bool = False, changed_since: str | None = None,
+          link: str | None = None) -> dict:
     t0 = time.time()
     get_parser = _parsers()
     files: list[FileInfo] = []
@@ -219,4 +256,6 @@ def build(root: Path, name: str, excludes: list[str], quiet: bool = False, chang
         "stats": {"files": len(files), "functions": sum(1 for f in funcs if f.kind != "toplevel"),
                   "skipped": skipped, **counts, "seconds": round(time.time() - t0, 2)},
     }
+    if link:
+        data["link"] = link
     return data

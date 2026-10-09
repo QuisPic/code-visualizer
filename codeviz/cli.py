@@ -7,7 +7,7 @@ import sys
 import webbrowser
 from pathlib import Path
 
-from .project import DEFAULT_EXCLUDES, build, checkout, is_git_url
+from .project import DEFAULT_EXCLUDES, build, checkout, is_git_url, source_link
 from .render import render
 
 
@@ -29,6 +29,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-compress", action="store_true",
                     help="keep the data as plain JSON in the page even when it is big (larger file)")
     ap.add_argument("--open", action="store_true", help="open the result in a browser")
+    ap.add_argument("--link", metavar="TEMPLATE",
+                    help="URL for 'open in browser' links, with {path}, {line}, {end} and {root} "
+                         "(default: the git remote's GitHub/GitLab/Bitbucket page for the scanned commit)")
+    ap.add_argument("--no-link", action="store_true", help="don't add links to the repository's web page")
     ap.add_argument("-q", "--quiet", action="store_true")
     args = ap.parse_args(argv)
 
@@ -36,7 +40,11 @@ def main(argv: list[str] | None = None) -> int:
     name = args.name or (args.source.rstrip("/").split("/")[-1].removesuffix(".git") if is_git_url(args.source)
                          else Path(args.source).expanduser().resolve().name)
     with checkout(args.source, args.ref) as root:
-        data = build(root, name, excludes, quiet=args.quiet, changed_since=args.changed_since)
+        link = None if args.no_link else args.link or source_link(root)
+        if link:
+            link = link.replace("{root}", root.as_posix())  # e.g. vscode://file{root}/{path}:{line}
+        data = build(root, name, excludes, quiet=args.quiet, changed_since=args.changed_since,
+                     link=link)
 
     out = Path(args.output or f"{name}-codeviz.html")
     out.write_text(render(data, compress=False if args.no_compress else None), encoding="utf-8")

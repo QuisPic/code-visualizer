@@ -75,7 +75,7 @@ which downloads each language's grammar the first time it is needed.
 ## Options
 
 ```
-codeviz SOURCE [-o OUT.html] [--ref BRANCH] [--name NAME] [-x GLOB ...] [--no-default-excludes] [--changed-since REF] [--json] [--no-compress] [--open]
+codeviz SOURCE [-o OUT.html] [--ref BRANCH] [--name NAME] [-x GLOB ...] [--no-default-excludes] [--changed-since REF] [--json] [--no-compress] [--link TEMPLATE | --no-link] [--open]
 ```
 
 | option | |
@@ -87,6 +87,8 @@ codeviz SOURCE [-o OUT.html] [--ref BRANCH] [--name NAME] [-x GLOB ...] [--no-de
 | `--changed-since REF` | mark functions changed since a branch, tag or commit (e.g. `main`), uncommitted edits included |
 | `--json` | also write the raw call graph next to the HTML |
 | `--no-compress` | keep the page's data as plain JSON (by default, big pages store it gzipped, about 4× smaller) |
+| `--link TEMPLATE` | URL for the **↗ github.com** link on each function, with `{path}`, `{line}`, `{end}`. By default it is worked out from the `origin` remote (GitHub, GitLab, Bitbucket, Codeberg) and points at the scanned commit. `{root}` is the scanned folder, so `--link 'vscode://file{root}/{path}:{line}'` opens functions in VS Code |
+| `--no-link` | leave that link out |
 | `--open` | open the result in your browser |
 
 In a git work tree, files ignored by `.gitignore` are skipped and checked-out submodules are included.
