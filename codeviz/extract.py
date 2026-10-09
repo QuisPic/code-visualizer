@@ -75,6 +75,7 @@ class FileInfo:
     # `from .util import clean as c` -> {"c": (".util", "clean")}, `import * as ns from "./x"` -> {"ns": ("./x", None)}
     bindings: dict[str, tuple[str, str | None]] = field(default_factory=dict)
     field_types: dict[str, dict[str, str]] = field(default_factory=dict)  # "ns.Class" -> member name -> class name
+    bases: dict[str, list[str]] = field(default_factory=dict)  # "ns.Class" -> base class / interface names
 
 
 # Declarations that give a variable, parameter or member a type (or a value whose type is obvious).
@@ -134,6 +135,35 @@ def _value_type(text: str) -> str | None:
     return name if _IDENT.fullmatch(name) else None
 
 
+# Children of a class node that list its base classes / interfaces, and the nodes inside them that name one.
+_HERITAGE = {
+    "base_class_clause", "superclass", "super_interfaces", "class_heritage", "base_list", "base_clause",
+    "class_interface_clause", "delegation_specifiers", "delegation_specifier", "inheritance_specifier",
+    "type_inheritance_clause", "extends_interfaces", "extends_type_clause", "interfaces",
+}
+_BASE_NAMES = {
+    "identifier", "type_identifier", "attribute", "member_expression", "qualified_identifier", "template_type",
+    "scoped_type_identifier", "generic_type", "scoped_identifier", "user_type", "constant", "name",
+    "qualified_name", "nested_type_identifier", "scope_resolution",
+}
+_BASE_SKIP = {"keyword_argument", "access_specifier", "type_arguments", "template_argument_list", "arguments",
+              "value_arguments", "comment"}
+
+
+def _base_names(node: Node) -> list[str]:
+    out = []
+    for child in node.named_children:
+        if child.type in _BASE_SKIP:
+            continue
+        if child.type in _BASE_NAMES:
+            name = re.split(r"::|\.|\\", _TEMPLATE_ARGS.sub("", _text(child)))[-1].strip()
+            if _IDENT.fullmatch(name) and name not in ("object", "Object"):
+                out.append(name)
+        else:
+            out += _base_names(child)
+    return out
+
+
 def _text(node: Node | None) -> str:
     return node.text.decode("utf-8", "replace") if node is not None else ""
 
@@ -187,6 +217,7 @@ class _Extractor:
         self.classes: list[tuple[list[str], str]] = []
         self.toplevel: Function | None = None
         self.field_types: dict[str, dict[str, str]] = {}
+        self.bases: dict[str, list[str]] = {}
 
     # ---- helpers -------------------------------------------------------------------------
     def _col(self, node: Node) -> int:
@@ -526,6 +557,13 @@ class _Extractor:
                     if t not in ("namespace_definition", "mod_item", "module", "internal_module"):
                         child_in_class = True
                         self.classes.append((scope, name[-1]))
+                        heritage = [c for c in node.named_children if c.type in _HERITAGE]
+                        supers = node.child_by_field_name("superclasses")  # Python: class A(B, C)
+                        if supers is not None:
+                            heritage.append(supers)
+                        bases = [b for h in heritage for b in _base_names(h)]
+                        if bases:
+                            self.bases[".".join(child_scope)] = bases
                     else:
                         child_in_class = False
             elif t in lang.functions and not (lang.family == "c" and node.child_by_field_name("body") is None):
@@ -679,4 +717,5 @@ def extract_file(lang: Language, parser, rel_path: str, source: bytes) -> FileIn
         ex.toplevel.code = ""  # top-level code is shown via its call list only
         functions = [ex.toplevel] + functions
     return FileInfo(rel_path, lang, source.count(b"\n") + 1, _imports(source), functions, ex.classes,
-                    _bindings(lang, tree.root_node), {k: v for k, v in ex.field_types.items() if v})
+                    _bindings(lang, tree.root_node), {k: v for k, v in ex.field_types.items() if v},
+                    ex.bases)

@@ -84,6 +84,13 @@ class Resolver:
                     self.py_modules["/".join(parts[-k:])].append(path)
         self._module_cache: dict[tuple[str, str], str | None] = {}
 
+        self.bases: dict[str, list[str]] = defaultdict(list)  # class name -> base names (all files)
+        for f in files:
+            for key, names in f.bases.items():
+                cls = key.split(".")[-1]
+                self.bases[cls] += [b for b in names if b != cls and b not in self.bases[cls]]
+        self._ancestors: dict[str, dict[str, int]] = {}
+
     def _qualifier(self, q: str | None, caller: Function) -> tuple[bool, bool, list[str], str]:
         """(self call, self member, qualifier parts, receiver name) for a call's qualifier, cached."""
         key = (q, caller.lang.name, caller.receiver)
@@ -222,6 +229,19 @@ class Resolver:
                 return typ
         return None
 
+    def ancestors(self, cls: str) -> dict[str, int]:
+        """Base classes of `cls`, nearest first (breadth-first, so roughly Python's MRO): name -> rank."""
+        hit = self._ancestors.get(cls)
+        if hit is None:
+            hit, queue = {}, list(self.bases.get(cls, ()))
+            while queue and len(hit) < 30:
+                b = queue.pop(0)
+                if b != cls and b not in hit:
+                    hit[b] = len(hit)
+                    queue += self.bases.get(b, ())
+            self._ancestors[cls] = hit
+        return hit
+
     def _score(self, call: Call, caller: Function, cand: Function) -> int | None:
         if cand.lang.family != caller.lang.family:
             return None
@@ -235,7 +255,12 @@ class Resolver:
         if self_member and caller_cls and cand_cls == caller_cls:
             return None  # `self.items.push()` calls a method of the field, not of our own class
         if self_call:
-            score += 100 if caller_cls and cand_cls == caller_cls else (-10 if cand_cls else -40)
+            if caller_cls and cand_cls == caller_cls:
+                score += 100
+            elif caller_cls and cand_cls in self.ancestors(caller_cls):
+                score += 90 - self.ancestors(caller_cls)[cand_cls]  # inherited method
+            else:
+                score += -10 if cand_cls else -40
         elif q:
             cand_info = self.paths[cand.path]
             if cand.scope and last in cand.scope:
@@ -261,6 +286,9 @@ class Resolver:
         else:
             if caller.scope and cand.scope == caller.scope:
                 score += 50
+            elif (caller_cls and cand_cls in self.ancestors(caller_cls) and caller.kind != "toplevel"
+                  and caller.lang.family in ("c", "java", "ruby")):
+                score += 45  # implicit this: a method inherited from a base class
             elif not cand.scope or cand_cls is None:
                 score += 10
             elif caller.lang.family in ("python", "js", "go") and cand.kind in ("method", "constructor"):

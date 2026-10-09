@@ -110,7 +110,8 @@ Swift, Ruby, PHP, Lua.
 There is no type checker involved: a call is matched to function definitions **by name**, then
 ranked by how close each candidate is to the caller. When the receiver is a variable, parameter or member
 with a declared or obvious type (`Shape s`, `s: Shape`, `s = Shape()`, `auto s = new Shape`, `self.s = Shape()`)
-and that class is visible from the caller, `s.area()` goes straight to `Shape.area`. Otherwise: `self`/`this` → same class, a matching
+and that class is visible from the caller, `s.area()` goes straight to `Shape.area`. Otherwise: `self`/`this` → same class, then its base classes
+(`class B(A)`, `class B : public A`, `extends`; in C++/Java a bare call counts as `this`), a matching
 qualifier (`ns::f`, `module.f`, `Class::f`), same file, the `.h`/`.cpp` pair, an imported or
 included file, same directory, nearest directory.
 
