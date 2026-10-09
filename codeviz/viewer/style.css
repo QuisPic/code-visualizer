@@ -159,6 +159,26 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height:
 .overview { overflow: auto; padding: 18px 22px 40px; }
 .overview h1 { font-size: 20px; margin: 0 0 4px; }
 .overview h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 26px 0 8px; }
+.h1-link { font-size: 13px; font-weight: 400; margin-left: 14px; }
+.deps-sub { display: flex; align-items: center; gap: 6px; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; padding: 1px 9px; background: var(--bg); }
+.seg button.on { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
+.back-key { color: var(--warn); font-weight: 600; }
+.dsm-wrap { overflow: auto; max-height: 70vh; border: 1px solid var(--border); border-radius: 6px; margin-top: 10px; }
+.dsm { border-collapse: collapse; font-size: 11px; font-variant-numeric: tabular-nums; }
+.dsm th, .dsm td { border: 1px solid var(--border); padding: 0; height: 24px; }
+.dsm th.col { position: sticky; top: 0; background: var(--bg-2); min-width: 30px; color: var(--muted); font-weight: 600; z-index: 1; }
+.dsm th.corner { position: sticky; top: 0; left: 0; z-index: 2; background: var(--bg-2); color: var(--muted); font-weight: 400; text-align: right; padding: 0 8px; }
+.dsm th.row-h { position: sticky; left: 0; background: var(--bg); text-align: left; font-weight: 400; padding: 0 8px; white-space: nowrap; max-width: 360px; overflow: hidden; text-overflow: ellipsis; z-index: 1; }
+.dsm th.row-h .num { display: inline-block; min-width: 22px; color: var(--muted); font-weight: 600; }
+.dsm th.row-h .name { font-family: var(--mono); }
+.dsm td { min-width: 30px; text-align: center; }
+.dsm td.diag { background: var(--bg-3); }
+.dsm td.fwd { background: color-mix(in srgb, var(--accent) calc(var(--a) * 55%), transparent); cursor: pointer; }
+.dsm td.back { background: color-mix(in srgb, var(--warn) calc(var(--a) * 70%), transparent); cursor: pointer; font-weight: 600; }
+.dsm td.sel { outline: 2px solid var(--fg); outline-offset: -2px; }
+.dsm td.fwd:hover, .dsm td.back:hover { outline: 1px solid var(--fg); outline-offset: -1px; }
 .cards { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
 .card { background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; min-width: 120px; }
 .card .num { font-size: 20px; font-weight: 600; }
