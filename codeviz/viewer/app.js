@@ -29,20 +29,34 @@
   const fileOf = (f) => FILES[f.f].p;
   const callers = FUNCS.map(() => []); // id -> [{from, line}]
   for (const f of FUNCS) for (const c of f.calls) if (c.t) for (const t of c.t) callers[t].push({ from: f.id, line: c.l });
+  // Test code: files under a test directory or named like a test (test_x.py, x_test.go, x.spec.ts, FooTest.java).
+  const TEST_DIR = /(^|\/)(tests?|__tests__|spec|specs|testing|testdata|e2e)\//i;
+  const TEST_FILE = /(^|\/)(test_[^/]*\.py|[^/]*_test\.\w+|[^/]*\.(test|spec)\.\w+|[^/]*Tests?\.(java|kt|cs|swift)|conftest\.py)$/;
+  const testFile = FILES.map((x) => TEST_DIR.test(x.p) || TEST_FILE.test(x.p));
+  const HAS_TESTS = testFile.some(Boolean);
+  const isTest = (id) => testFile[FUNCS[id].f];
   const byFile = FILES.map(() => []);
   for (const f of FUNCS) byFile[f.f].push(f);
 
   const prefs = loadPrefs();
   function loadPrefs() {
-    const d = { ext: false, low: true, theme: null, sidebar: null, treeW: null, view: "graph", legend: false, srcTab: "code" };
+    const d = { ext: false, low: true, tests: true, theme: null, sidebar: null, treeW: null, view: "graph", legend: false, srcTab: "code" };
     try { return Object.assign(d, JSON.parse(localStorage.getItem("codeviz-prefs") || "{}")); } catch { return d; }
   }
   function savePrefs() { try { localStorage.setItem("codeviz-prefs", JSON.stringify(prefs)); } catch { /* ignore */ } }
 
   // Children of a node in the call tree. Outgoing: grouped by target (or by name for ambiguous/external).
+  // Whether to hide a link to/from function `id` because it is test code (never hides the function itself).
+  const hidden = (id) => !prefs.tests && isTest(id);
   function outgoing(f) {
     const groups = new Map();
-    for (const c of f.calls) {
+    for (const c0 of f.calls) {
+      let c = c0;
+      if (c.t && !prefs.tests) {
+        const t = c.t.filter((id) => !isTest(id));
+        if (!t.length) continue;
+        if (t.length !== c.t.length) c = Object.assign({}, c, { t, x: t.length > 1 ? "a" : c.x === "a" ? "l" : c.x });
+      }
       let key, item;
       if (!c.t) {
         if (!prefs.ext) continue;
@@ -64,6 +78,7 @@
   function incoming(f) {
     const groups = new Map();
     for (const c of callers[f.id]) {
+      if (hidden(c.from)) continue;
       const g = groups.get(c.from);
       if (g) g.lines.push(c.line); else groups.set(c.from, { type: "fn", id: c.from, lines: [c.line] });
     }
@@ -1372,7 +1387,8 @@
         dir === "impact" ? null : el("div", { class: "tabs seg" }, viewBtn("graph", "Graph", "Functions as nodes with lines to what they call"),
           viewBtn("list", "List", "Indented list")),
         dir === "out" || dir === "both" ? opt("ext", "external", "Show calls to functions that are not defined in this codebase") : null,
-        dir !== "in" ? opt("low", "guesses", "Show links resolved by name only (lower confidence)") : null)), treeBox);
+        dir !== "in" ? opt("low", "guesses", "Show links resolved by name only (lower confidence)") : null,
+        HAS_TESTS && dir !== "impact" ? opt("tests", "tests", "Show functions defined in test files") : null)), treeBox);
     const split = el("div", { class: "splitter" });
     const srcTitle = el("span", { class: "src-title" });
     // the source pane shows either the function's code or every place that calls it
@@ -1600,13 +1616,14 @@
     const reach = (id) => {
       const seen = new Set([id]), stack = [id];
       while (stack.length && seen.size < 5000) {
-        for (const c of FUNCS[stack.pop()].calls) if (c.t && c.x !== "a") for (const t of c.t) if (!seen.has(t)) { seen.add(t); stack.push(t); }
+        for (const c of FUNCS[stack.pop()].calls) if (c.t && c.x !== "a") for (const t of c.t) if (!seen.has(t) && !hidden(t)) { seen.add(t); stack.push(t); }
       }
       return seen.size - 1;
     };
-    const entries = FUNCS.filter((f) => !callers[f.id].length && f.calls.some((c) => c.t))
+    const shownCallers = (id) => callers[id].filter((c) => !hidden(c.from));
+    const entries = FUNCS.filter((f) => !hidden(f.id) && !shownCallers(f.id).length && f.calls.some((c) => c.t))
       .map((f) => ({ f, n: reach(f.id) })).sort((a, b) => b.n - a.n).slice(0, 30);
-    const popular = real.map((f) => ({ f, n: new Set(callers[f.id].map((c) => c.from)).size }))
+    const popular = real.filter((f) => !hidden(f.id)).map((f) => ({ f, n: new Set(shownCallers(f.id).map((c) => c.from)).size }))
       .filter((x) => x.n > 1).sort((a, b) => b.n - a.n).slice(0, 30);
     // changed functions, ranked by how many functions can reach them (what the change can affect)
     const upstream = (id) => {
@@ -1652,6 +1669,9 @@
       el("h2", null, "Codebase map"),
       el("p", { class: "help small" }, "Each box is a file, sized by lines of code. Click a folder to zoom in, a file to list its functions."),
       codebaseMap(),
+      HAS_TESTS ? el("label", { class: "help", title: "Show functions defined in test files" },
+        el("input", { type: "checkbox", checked: prefs.tests, onchange: (e) => { prefs.tests = e.target.checked; savePrefs(); showOverview(); } }),
+        " include test code in these lists") : null,
       entries.length ? el("h2", null, "Entry points (not called from anywhere, ranked by how much they reach)") : null,
       entries.length ? list(entries, (n) => n + " reachable") : null,
       popular.length ? el("h2", null, "Most called") : null,
