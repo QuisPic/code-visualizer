@@ -246,6 +246,6 @@ def test_churn(tmp_path):
 def test_callbacks(graph):
     data, find, targets = graph
     refs = lambda f: {c["n"]: targets(f, c["n"]) for c in f["calls"] if c.get("r")}
-    assert refs(find("schedule")) == {"onTick": ["onTick"]}  # `finished` is a local variable there
+    assert refs(find("schedule")) == {"onAlarm": ["onAlarm"]}  # `finished` is a local variable there
     assert refs(find("spawn")) == {"crunch": ["crunch"]}
-    assert [c["n"] for c in find("onTick")["calls"]] == []
+    assert [c["n"] for c in find("onAlarm")["calls"]] == []
