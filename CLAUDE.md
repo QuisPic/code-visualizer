@@ -43,7 +43,7 @@ no `t` is external. `stats` holds counts. Changing a key means changing `project
 - Output must stay **one offline file**: no network requests, external scripts or fonts in the
   viewer. New viewer files must be inlined by `render.py` and covered by
   `[tool.setuptools.package-data]`.
-- Viewer state lives in the URL hash (`#/`, `#/f/<id>`, `#/f/<id>/in` for callers) so back/forward
+- Viewer state lives in the URL hash (`#/`, `#/f/<id>`, `#/f/<id>/in` for callers, `#/f/<id>/impact`) so back/forward
   works; user prefs persist in `localStorage["codeviz-prefs"]` (wrap access in try/catch).
 - Adding a language: add a `Language` to `languages.py` (node type names come from that
   grammar in `tree-sitter-language-pack`), handle any odd name/qualifier shapes in `extract.py`,

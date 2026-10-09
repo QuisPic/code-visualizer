@@ -793,6 +793,100 @@
         row(el("span", { class: "lg-text" }, "↻"), "recursion: already shown above in this branch")));
   }
 
+  // ---------------------------------------------------------------- impact (transitive callers)
+  // Everything that can end up calling `f`, grouped by how many calls away it is. A function counts as
+  // "sure" when some shortest chain from it to `f` uses only confident links.
+  function impactOf(f, withGuesses) {
+    const MAX = 5000;
+    const info = new Map([[f.id, { depth: 0, sure: true, via: null, lines: [] }]]);
+    let frontier = [f.id];
+    for (let depth = 1; frontier.length && info.size < MAX; depth++) {
+      const next = [];
+      for (const id of frontier) {
+        const here = info.get(id);
+        for (const c of callerLinks()[id]) {
+          if (c.x !== "h" && !withGuesses) continue;
+          const sure = here.sure && c.x === "h";
+          const seen = info.get(c.from);
+          if (!seen) {
+            info.set(c.from, { depth, sure, via: id, lines: [c.line] });
+            next.push(c.from);
+          } else if (seen.depth === depth && seen.via === id) {
+            if (!seen.lines.includes(c.line)) seen.lines.push(c.line);
+          } else if (seen.depth === depth && sure && !seen.sure) {
+            Object.assign(seen, { sure, via: id, lines: [c.line] });
+          }
+        }
+      }
+      frontier = next;
+    }
+    info.delete(f.id);
+    return { info, truncated: info.size >= MAX - 1 };
+  }
+  let callerLinksCache = null;
+  function callerLinks() { // id -> [{from, line, x}] with the link confidence, which `callers` doesn't keep
+    if (!callerLinksCache) {
+      callerLinksCache = FUNCS.map(() => []);
+      for (const g of FUNCS) for (const c of g.calls) if (c.t) for (const t of c.t) callerLinksCache[t].push({ from: g.id, line: c.l, x: c.x || "h" });
+    }
+    return callerLinksCache;
+  }
+
+  function buildImpact(f, container, showSource) {
+    container.textContent = "";
+    const { info, truncated } = impactOf(f, prefs.low);
+    const byDepth = [];
+    for (const [id, it] of info) (byDepth[it.depth] ||= []).push({ id, ...it });
+    const files = new Set([...info.keys()].map((id) => FUNCS[id].f));
+    const entries = [...info.keys()].filter((id) => !callers[id].length);
+    const unsure = [...info.values()].filter((it) => !it.sure).length;
+
+    const wrap = el("div", { class: "impact" });
+    if (!info.size) {
+      wrap.append(el("div", { class: "empty-note" }, "Nothing in this codebase calls " + f.n + "(), so changing it affects no other function here. "
+        + "It may be an entry point, a callback, or called dynamically."));
+      container.append(wrap);
+      return;
+    }
+    const num = (n, word) => el("b", null, n.toLocaleString() + " " + word + (n === 1 ? "" : "s"));
+    wrap.append(el("div", { class: "impact-summary" },
+      "Changing ", el("span", { class: "mono" }, f.n + "()"), " can affect ", num(info.size, "function"), " in ", num(files.size, "file"),
+      ", up to ", num(byDepth.length - 1, "call"), " away", entries.length ? ", reaching " : "",
+      entries.length ? num(entries.length, "entry point") : null, ".",
+      unsure ? el("div", { class: "muted" }, unsure.toLocaleString() + " of them only through best-guess or ambiguous links (marked guess).") : null,
+      truncated ? el("div", { class: "muted" }, "Stopped after " + info.size.toLocaleString() + " functions.") : null));
+
+    let selected = null;
+    for (let d = 1; d < byDepth.length; d++) {
+      const items = byDepth[d].sort((a, b) => (b.sure - a.sure) || fileOf(FUNCS[a.id]).localeCompare(fileOf(FUNCS[b.id])) || FUNCS[a.id].l - FUNCS[b.id].l);
+      const ul = el("ul", { class: "tree impact-list" });
+      const SHOW = 200;
+      for (const it of items.slice(0, SHOW)) {
+        const g = FUNCS[it.id], via = FUNCS[it.via];
+        const row = el("div", { class: "row" + (it.sure ? "" : " low"), "data-hc": g.id, "data-hc-hint": "Click to see where it calls " + via.n + "() · double-click to open" },
+          el("span", { class: "icon " + g.k }, KIND_LETTER[g.k]), fnLabel(g),
+          d > 1 ? el("span", { class: "via" }, "→ " + via.n + "()") : null,
+          it.sure ? null : el("span", { class: "badge low" }, "guess"),
+          callers[g.id].length ? null : el("span", { class: "badge entry", title: "Nothing calls this: an entry point" }, "entry"),
+          el("span", { class: "meta" }, fileOf(g) + ":" + g.l));
+        row.addEventListener("click", () => {
+          if (selected) selected.classList.remove("selected");
+          selected = row; row.classList.add("selected");
+          showSource(g.id, null, it.lines);
+        });
+        row.addEventListener("dblclick", () => go(g.id));
+        ul.append(el("li", null, row));
+      }
+      if (items.length > SHOW) ul.append(el("li", { class: "muted more" }, "… and " + (items.length - SHOW).toLocaleString() + " more"));
+      const head = el("div", { class: "impact-head" }, el("span", { class: "caret open" }, "▸"),
+        d === 1 ? "Called directly by" : d + " calls away", el("span", { class: "badge" }, items.length.toLocaleString()));
+      head.addEventListener("click", () => { ul.hidden = !ul.hidden; head.firstChild.classList.toggle("open", !ul.hidden); });
+      if (d > 3) { ul.hidden = true; head.firstChild.classList.remove("open"); }
+      wrap.append(el("section", { class: "impact-group" }, head, ul));
+    }
+    container.append(wrap);
+  }
+
   // ---------------------------------------------------------------- explorer
   const explorer = $("#explorer");
   const dirTree = { dirs: new Map(), files: [] };
@@ -915,10 +1009,18 @@
     const codeBox = el("div", { class: "panel-scroll" });
     const tabOut = el("button", { class: "tab" + (dir === "out" ? " active" : ""), onclick: () => go(id, "out") }, "Calls ▸");
     const tabIn = el("button", { class: "tab" + (dir === "in" ? " active" : ""), onclick: () => go(id, "in") }, "◂ Callers");
+    const tabImpact = el("button", { class: "tab" + (dir === "impact" ? " active" : ""), onclick: () => go(id, "impact"),
+      title: "Everything that can end up calling this function, grouped by distance" }, "Impact");
     const renderTree = () => {
+      showSource(f.id);
+      if (dir === "impact") {
+        treeBox.className = "panel-scroll";
+        treePanel.classList.add("is-graph"); // same width as the graph
+        buildImpact(f, treeBox, showSource);
+        return;
+      }
       treeBox.className = prefs.view === "list" ? "panel-scroll" : "graph-box";
       treePanel.classList.toggle("is-graph", prefs.view !== "list");
-      showSource(f.id);
       if (prefs.view === "list") buildCallTree(f, dir, treeBox, codeBox);
       else buildCallGraph(f, dir, treeBox, codeBox, showSource);
     };
@@ -930,18 +1032,18 @@
         for (const b of e.target.parentNode.children) b.classList.toggle("active", b === e.target);
         renderTree();
       } }, label);
-    treePanel.append(el("div", { class: "pane-title" }, el("div", { class: "tabs" }, tabOut, tabIn),
+    treePanel.append(el("div", { class: "pane-title" }, el("div", { class: "tabs" }, tabOut, tabIn, tabImpact),
       el("div", { class: "opts" },
-        el("div", { class: "tabs seg" }, viewBtn("graph", "Graph", "Functions as nodes with lines to what they call"),
+        dir === "impact" ? null : el("div", { class: "tabs seg" }, viewBtn("graph", "Graph", "Functions as nodes with lines to what they call"),
           viewBtn("list", "List", "Indented list")),
         dir === "out" ? opt("ext", "external", "Show calls to functions that are not defined in this codebase") : null,
-        dir === "out" ? opt("low", "guesses", "Show links resolved by name only (lower confidence)") : null)), treeBox);
+        dir !== "in" ? opt("low", "guesses", "Show links resolved by name only (lower confidence)") : null)), treeBox);
     const split = el("div", { class: "splitter" });
     const srcTitle = el("span", { class: "src-title" });
     codePanel.append(el("div", { class: "pane-title" }, srcTitle,
       el("span", { class: "opts muted" }, "click a call to follow it")), codeBox);
     // fid = function to show; or null with a note (external / ambiguous graph nodes)
-    function showSource(fid, note) {
+    function showSource(fid, note, lines) {
       srcTitle.textContent = "";
       if (fid == null) {
         delete codeBox.dataset.fn;
@@ -952,8 +1054,9 @@
       }
       const sf = FUNCS[fid];
       codeBox.dataset.fn = fid;
-      renderCode(sf, codeBox);
+      renderCode(sf, codeBox, lines);
       codeBox.scrollTop = 0;
+      if (lines && lines.length) highlightLines(codeBox, lines, true);
       if (fid === f.id) { srcTitle.append("Source"); return; }
       srcTitle.append("Source · ", el("span", { class: "src-name" }, sf.n + "()"), " ",
         el("span", { class: "muted src-file" }, fileOf(sf) + ":" + sf.l), " ",
@@ -1020,13 +1123,13 @@
 
   // ---------------------------------------------------------------- routing
   function go(id, dir) {
-    const h = "#/f/" + id + (dir === "in" ? "/in" : "");
+    const h = "#/f/" + id + (dir === "in" ? "/in" : dir === "impact" ? "/impact" : "");
     if (location.hash !== h) location.hash = h; else route();
   }
   function route() {
     hidePopup(); hideCard();
-    const m = /^#\/f\/(\d+)(\/in)?/.exec(location.hash);
-    if (m) showFunction(+m[1], m[2] ? "in" : "out"); else showOverview();
+    const m = /^#\/f\/(\d+)(?:\/(in|impact))?/.exec(location.hash);
+    if (m) showFunction(+m[1], m[2] || "out"); else showOverview();
     main.scrollTop = 0;
   }
   window.addEventListener("hashchange", route);
