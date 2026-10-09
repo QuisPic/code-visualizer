@@ -13,6 +13,10 @@ from .languages import Language
 
 _TEMPLATE_ARGS = re.compile(r"<[^<>]*>")
 _IDENT = re.compile(r"[A-Za-z_$][\w$]*")
+# grammars without field names (Kotlin) put the name in the first identifier-like child
+_NAME_TYPES = ("simple_identifier", "type_identifier", "identifier")
+# declarations whose name is a keyword rather than an identifier
+_FIXED_NAMES = {"init_declaration": "init", "deinit_declaration": "deinit", "secondary_constructor": "constructor"}
 
 
 @dataclass
@@ -76,6 +80,13 @@ def _clean_doc(lines: list[str]) -> str:
     if len(out) > _DOC_MAX_LINES or len(text) > _DOC_MAX_CHARS:
         text = text[:_DOC_MAX_CHARS].rstrip() + " …"
     return text
+
+
+def _name_child(node: Node, field_name: str = "name") -> Node | None:
+    found = node.child_by_field_name(field_name)
+    if found is None:
+        found = next((c for c in node.named_children if c.type in _NAME_TYPES), None)
+    return found
 
 
 def _split_qualified(text: str) -> list[str]:
@@ -164,6 +175,18 @@ class _Extractor:
         if parent is None:
             return None
         t = parent.type
+        if t == "expression_list" and parent.parent is not None and parent.parent.type == "assignment_statement":
+            # Lua `local a, f = 1, function() end`: pair the value with its variable
+            targets = parent.parent.named_children[0].named_children
+            values = parent.named_children
+            idx = next((i for i, v in enumerate(values) if v.id == node.id), -1)
+            if 0 <= idx < len(targets):
+                parts = [p for p in re.split(r"[.:]", _text(targets[idx])) if p]
+                return parts[-2:] if parts and all(_IDENT.fullmatch(p) for p in parts) else None
+            return None
+        if t == "field" and self.lang.name == "lua":
+            key = _text(parent.child_by_field_name("name"))
+            return [key] if _IDENT.fullmatch(key) else None
         if t == "variable_declarator":
             return [_text(parent.child_by_field_name("name"))]
         if t in ("pair", "property_assignment"):
@@ -182,16 +205,28 @@ class _Extractor:
         t = node.type
         if self.lang.family == "c":
             return self._c_declarator_name(node.child_by_field_name("declarator"))
-        if t in ("arrow_function", "function_expression", "function", "generator_function"):
+        if t in _FIXED_NAMES:
+            return [_FIXED_NAMES[t]]
+        if t in ("arrow_function", "function_expression", "function", "generator_function", "function_definition"):
             assigned = self._assigned_name(node)
             if assigned:
                 return assigned
             name = node.child_by_field_name("name")
             return [_text(name)] if name is not None else None
-        name = node.child_by_field_name("name")
+        name = _name_child(node)
         if name is None:
             return None
+        if self.lang.name == "lua":  # `function M.add()` / `function M:method()`
+            parts = [p for p in re.split(r"[.:]", _text(name)) if p]
+            return parts[-2:] if parts and all(_IDENT.fullmatch(p) for p in parts) else None
         parts = [_text(name)]
+        if t == "destructor_declaration":
+            parts = ["~" + parts[0]]
+        recv = node.child_by_field_name("receiver") if self.lang.name == "kotlin" else None
+        if recv is not None:  # extension function `fun Cart.total()`
+            idents = _IDENT.findall(_TEMPLATE_ARGS.sub("", _text(recv)))
+            if idents:
+                parts.insert(0, idents[-1])
         if t == "method_declaration" and self.lang.name == "go":
             recv = _text(node.child_by_field_name("receiver"))
             idents = _IDENT.findall(_TEMPLATE_ARGS.sub("", recv.replace("[", "<").replace("]", ">")))
@@ -208,8 +243,32 @@ class _Extractor:
         """Return (name node, qualifier, separator) for a callee expression."""
         t = node.type
         if t in ("identifier", "field_identifier", "property_identifier", "type_identifier", "name",
-                 "constant", "private_property_identifier"):
+                 "constant", "private_property_identifier", "simple_identifier"):
             return node, None, None
+        if t == "navigation_expression":  # Swift / Kotlin `target.name`
+            named = node.named_children
+            suffix = node.child_by_field_name("suffix") or (named[-1] if named else None)
+            target = node.child_by_field_name("target") or (named[0] if len(named) > 1 else None)
+            name = _name_child(suffix, "suffix") if suffix is not None else None
+            if name is None or target is None:
+                return None
+            return name, _text(target), "."
+        if t in ("dot_index_expression", "method_index_expression"):  # Lua `t.f` / `t:m`
+            name = node.child_by_field_name("field") or node.child_by_field_name("method")
+            table = node.child_by_field_name("table")
+            return (name, _text(table), ".") if name is not None else None
+        if t in ("member_access_expression", "qualified_name"):  # C# `obj.Name` / `Ns.Type`
+            name = node.child_by_field_name("name")
+            obj = node.child_by_field_name("expression") or node.child_by_field_name("qualifier")
+            if obj is None and node.children and node.children[0] != name:
+                obj = node.children[0]  # `this` / `base` are anonymous tokens
+            if name is None:
+                return None
+            res = self._callee(name)
+            return (res[0], _text(obj) or None, ".") if res is not None else None
+        if t == "generic_name":  # C# `Log<int>`
+            name = _name_child(node)
+            return (name, None, None) if name is not None else None
         if t in ("member_expression", "attribute", "field_expression", "selector_expression"):
             obj = (node.child_by_field_name("object") or node.child_by_field_name("argument")
                    or node.child_by_field_name("value") or node.child_by_field_name("operand"))
@@ -269,7 +328,9 @@ class _Extractor:
             return Call(_text(name), _text(recv) if recv is not None else None, sep,
                         name.start_point[0] + 1, self._col(name))
 
-        fn = node.child_by_field_name("function")
+        fn = node.child_by_field_name("function") or node.child_by_field_name("name")
+        if fn is None and self.lang.name in ("swift", "kotlin"):
+            fn = node.named_children[0] if node.named_children else None
         if fn is None:
             return None
         res = self._callee(fn)
@@ -289,7 +350,7 @@ class _Extractor:
         cls = full_scope[-1] if full_scope else None
         if name in self.lang.constructor_names or (cls is not None and name == cls):
             kind = "constructor"
-        if self.lang.name == "java" and node.type == "constructor_declaration":
+        if self.lang.name in ("java", "csharp") and node.type == "constructor_declaration":
             kind = "constructor"
         # include a leading template<...> line for C++
         start_node = node.parent if node.parent is not None and node.parent.type == "template_declaration" else node
@@ -310,7 +371,7 @@ class _Extractor:
 
             if t in lang.scopes:
                 field_name = lang.scopes[t]
-                name_node = node.child_by_field_name(field_name) if field_name else None
+                name_node = _name_child(node, field_name) if field_name else None
                 name = _split_qualified(_text(name_node)) if name_node is not None else []
                 if name:
                     child_scope = scope + name
