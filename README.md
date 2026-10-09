@@ -28,6 +28,9 @@ Open the generated `<name>-codeviz.html` in a browser. No server, no internet ne
 - **Hover cards**: rest the pointer on a call in the source, a graph node or a function in a list to
   see its signature, the comment or docstring above it, where it lives and how many callers and callees
   it has.
+- **Path finder** (**⇢ Path** in the top bar, or *find path to…* under a function's name): pick two
+  functions and see the shortest chains of calls from one to the other, step by step, with the call
+  on each step highlighted in the source.
 - **Search** (`/`), back/forward (`Alt+←/→` or the browser buttons; every view has its own URL),
   light/dark theme, and an overview page listing entry points and the most-called functions.
 

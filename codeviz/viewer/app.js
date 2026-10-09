@@ -1000,7 +1000,8 @@
         el("span", { class: "mono" }, fileOf(f) + ":" + f.l + (f.e > f.l ? "–" + f.e : "")),
         el("span", null, f.k),
         el("span", null, "calls " + nCallees + " function" + (nCallees === 1 ? "" : "s") + (nExt ? " (+" + nExt + " external)" : "")),
-        el("span", null, "called from " + callers[id].length + " place" + (callers[id].length === 1 ? "" : "s")))));
+        el("span", null, "called from " + callers[id].length + " place" + (callers[id].length === 1 ? "" : "s")),
+        el("a", { href: "#/path/" + id + "/", title: "Find the chains of calls from this function to another one" }, "find path to…"))));
 
     const body = el("div", { class: "fn-body" });
     const treePanel = el("section", { class: "panel tree-panel" });
@@ -1121,6 +1122,150 @@
       popular.length ? list(popular, (n) => n + " callers") : null));
   }
 
+
+  // ---------------------------------------------------------------- path finder
+  // Shortest call chains from one function to another (BFS over callees), up to MAX_PATHS of them.
+  const MAX_PATHS = 8;
+  function shortestPaths(fromId, toId, withGuesses) {
+    const dist = new Map([[fromId, 0]]), preds = new Map();
+    let frontier = [fromId];
+    while (frontier.length && !dist.has(toId)) {
+      const next = [];
+      for (const id of frontier) {
+        const d = dist.get(id);
+        for (const c of FUNCS[id].calls) {
+          if (!c.t || (c.x !== "h" && !withGuesses)) continue;
+          for (const t of c.t) {
+            if (!dist.has(t)) { dist.set(t, d + 1); preds.set(t, []); next.push(t); }
+            if (dist.get(t) === d + 1) {
+              const list = preds.get(t);
+              const e = list.find((p) => p.id === id);
+              if (e) { if (!e.lines.includes(c.l)) e.lines.push(c.l); if (c.x === "h") e.sure = true; }
+              else list.push({ id, lines: [c.l], sure: c.x === "h" });
+            }
+          }
+        }
+      }
+      frontier = next;
+    }
+    if (!dist.has(toId) || fromId === toId) return [];
+    // walk back from the target; prefer confident steps so the first paths shown are the most certain
+    const paths = [];
+    const walk = (id, tail) => {
+      if (paths.length >= MAX_PATHS) return;
+      if (id === fromId) { paths.push(tail); return; }
+      for (const p of preds.get(id).slice().sort((a, b) => b.sure - a.sure)) walk(p.id, [{ id: p.id, to: id, lines: p.lines, sure: p.sure }, ...tail]);
+    };
+    walk(toId, []);
+    return paths;
+  }
+
+  function fnPicker(placeholder, value, onPick) {
+    const input = el("input", { type: "search", placeholder, autocomplete: "off", spellcheck: "false", value: value != null ? qname(FUNCS[value]) : "" });
+    const list = el("ul", { class: "search-results" });
+    list.hidden = true;
+    let items = [], act = 0;
+    const render = () => {
+      list.textContent = "";
+      items = input.value.trim() ? findFunctions(input.value, 30) : [];
+      act = 0;
+      items.forEach((f, i) => list.append(el("li", { class: i ? "" : "active", onmousedown: (e) => { e.preventDefault(); pick(i); } },
+        el("span", { class: "icon " + f.k }, KIND_LETTER[f.k]), fnLabel(f), el("span", { class: "path" }, fileOf(f) + ":" + f.l))));
+      if (input.value.trim() && !items.length) list.append(el("li", { class: "muted" }, "No functions match"));
+      list.hidden = !input.value.trim();
+    };
+    const pick = (i) => { const f = items[i]; if (!f) return; list.hidden = true; input.value = qname(f); input.blur(); onPick(f.id); };
+    input.addEventListener("input", render);
+    input.addEventListener("focus", () => { input.select(); });
+    input.addEventListener("blur", () => setTimeout(() => (list.hidden = true), 100));
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        if (!items.length) return;
+        act = (act + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+        list.querySelectorAll("li").forEach((li, i) => li.classList.toggle("active", i === act));
+      } else if (e.key === "Enter") pick(act);
+      else if (e.key === "Escape") { list.hidden = true; input.blur(); }
+    });
+    return { node: el("div", { class: "search picker" }, input, list), input };
+  }
+
+  function showPath(fromId, toId) {
+    const from = FUNCS[fromId], to = FUNCS[toId];
+    document.title = "Path" + (from ? " from " + from.n : "") + (to ? " to " + to.n : "") + " · " + DATA.name;
+    main.textContent = "";
+    for (const r of explorer.querySelectorAll(".row.selected")) r.classList.remove("selected");
+    const setRoute = (a, b) => { location.hash = "#/path/" + (a ?? "") + "/" + (b ?? ""); };
+    const pickFrom = fnPicker("From function…", from ? fromId : null, (id) => setRoute(id, to ? toId : null));
+    const pickTo = fnPicker("To function…", to ? toId : null, (id) => setRoute(from ? fromId : null, id));
+    const swap = el("button", { title: "Swap", onclick: () => setRoute(to ? toId : null, from ? fromId : null) }, "⇄");
+    const guesses = el("label", { title: "Also follow links resolved by name only" },
+      el("input", { type: "checkbox", checked: prefs.low, onchange: (e) => { prefs.low = e.target.checked; savePrefs(); showPath(fromId, toId); } }), "guesses");
+    main.append(el("div", { class: "fn-header path-header" },
+      el("div", { class: "fn-title" }, "How does one function reach another?"),
+      el("div", { class: "path-pickers" }, pickFrom.node, swap, pickTo.node, guesses)));
+
+    const body = el("div", { class: "fn-body" });
+    const listPanel = el("section", { class: "panel tree-panel is-graph" });
+    const listBox = el("div", { class: "panel-scroll" });
+    const codePanel = el("section", { class: "panel code-panel" });
+    const codeBox = el("div", { class: "panel-scroll" });
+    const srcTitle = el("span", { class: "src-title" }, "Source");
+    listPanel.append(el("div", { class: "pane-title" }, el("span", null, "Call chains")), listBox);
+    codePanel.append(el("div", { class: "pane-title" }, srcTitle), codeBox);
+    body.append(listPanel, el("div", { class: "splitter" }), codePanel);
+    main.append(body);
+    const showCode = (id, lines) => {
+      const f = FUNCS[id];
+      srcTitle.textContent = "";
+      srcTitle.append("Source · ", el("span", { class: "src-name" }, f.n + "()"), " ", el("span", { class: "muted src-file" }, fileOf(f) + ":" + f.l), " ",
+        el("button", { class: "link-btn src-open", onclick: () => go(id) }, "open ↗"));
+      renderCode(f, codeBox, lines);
+      codeBox.scrollTop = 0;
+      if (lines && lines.length) highlightLines(codeBox, lines, true);
+    };
+    const note = (text) => listBox.append(el("div", { class: "empty-note" }, text));
+
+    if (!from || !to) {
+      note("Pick two functions to see the chains of calls that lead from the first to the second.");
+      if (from) showCode(fromId);
+      requestAnimationFrame(() => (from ? pickTo : pickFrom).input.focus());
+      return;
+    }
+    let paths = shortestPaths(fromId, toId, prefs.low), reversed = false;
+    if (!paths.length) { paths = shortestPaths(toId, fromId, prefs.low); reversed = paths.length > 0; }
+    if (!paths.length) {
+      note("No chain of calls in this codebase leads from " + from.n + "() to " + to.n + "() or back"
+        + (prefs.low ? "." : ". Tick “guesses” to also follow links matched by name only."));
+      showCode(fromId);
+      return;
+    }
+    const steps = paths[0].length;
+    listBox.append(el("div", { class: "path-summary" },
+      reversed ? el("div", { class: "muted" }, from.n + "() doesn’t lead to " + to.n + "(), but the reverse does:") : null,
+      el("b", null, (reversed ? to : from).n + "()"), " reaches ", el("b", null, (reversed ? from : to).n + "()"), " in ",
+      el("b", null, steps + " call" + (steps === 1 ? "" : "s")), paths.length > 1 ? " along " + (paths.length >= MAX_PATHS ? "at least " : "") + paths.length + " different shortest chains." : "."));
+    let selected = null;
+    const select = (row, id, lines) => { if (selected) selected.classList.remove("selected"); selected = row; row.classList.add("selected"); showCode(id, lines); };
+    paths.forEach((path, pi) => {
+      const chain = el("ol", { class: "chain" });
+      const stepRow = (id, call) => {
+        const f = FUNCS[id];
+        const row = el("div", { class: "row chain-step" + (call && !call.sure ? " low" : ""), "data-hc": id },
+          el("span", { class: "icon " + f.k }, KIND_LETTER[f.k]), fnLabel(f),
+          call && !call.sure ? el("span", { class: "badge low" }, "guess") : null,
+          call ? el("span", { class: "meta" }, "calls " + FUNCS[call.to].n + "() on line " + call.lines.join(", ")) : el("span", { class: "meta" }, fileOf(f) + ":" + f.l));
+        row.addEventListener("click", () => select(row, id, call ? call.lines : null));
+        row.addEventListener("dblclick", () => go(id));
+        return el("li", null, row);
+      };
+      for (const step of path) chain.append(stepRow(step.id, step));
+      chain.append(stepRow(path[path.length - 1].to, null));
+      listBox.append(el("section", { class: "chain-group" }, el("div", { class: "path-head" }, "Chain " + (pi + 1)), chain));
+      if (pi === 0) select(chain.querySelector(".row"), path[0].id, path[0].lines);
+    });
+  }
+
   // ---------------------------------------------------------------- routing
   function go(id, dir) {
     const h = "#/f/" + id + (dir === "in" ? "/in" : dir === "impact" ? "/impact" : "");
@@ -1129,28 +1274,36 @@
   function route() {
     hidePopup(); hideCard();
     const m = /^#\/f\/(\d+)(?:\/(in|impact))?/.exec(location.hash);
-    if (m) showFunction(+m[1], m[2] || "out"); else showOverview();
+    const p = /^#\/path\/(\d*)\/(\d*)/.exec(location.hash);
+    if (m) showFunction(+m[1], m[2] || "out");
+    else if (p) showPath(p[1] === "" ? null : +p[1], p[2] === "" ? null : +p[2]);
+    else showOverview();
     main.scrollTop = 0;
   }
   window.addEventListener("hashchange", route);
 
   // ---------------------------------------------------------------- search
-  const search = $("#search"), results = $("#search-results");
-  const index = FUNCS.filter((f) => f.k !== "toplevel").map((f) => ({ f, n: f.n.toLowerCase(), q: qname(f).toLowerCase(), p: fileOf(f).toLowerCase() }));
-  let active = 0, shown = [];
-  function runSearch() {
-    const q = search.value.trim().toLowerCase();
-    results.textContent = "";
-    if (!q) { results.hidden = true; return; }
+  let searchIndex = null;
+  function findFunctions(query, limit) {
+    searchIndex ||= FUNCS.filter((f) => f.k !== "toplevel").map((f) => ({ f, n: f.n.toLowerCase(), q: qname(f).toLowerCase(), p: fileOf(f).toLowerCase() }));
+    const q = query.trim().toLowerCase();
     const scored = [];
-    for (const it of index) {
+    for (const it of searchIndex) {
       let s = -1;
       if (it.n === q) s = 100; else if (it.n.startsWith(q)) s = 80; else if (it.q === q || it.q.endsWith(q)) s = 75;
       else if (it.n.includes(q)) s = 60; else if (it.q.includes(q)) s = 40; else if (it.p.includes(q)) s = 20;
       if (s >= 0) scored.push([s - it.n.length * 0.01, it]);
     }
     scored.sort((a, b) => b[0] - a[0]);
-    shown = scored.slice(0, 40).map((x) => x[1].f);
+    return scored.slice(0, limit).map((x) => x[1].f);
+  }
+  const search = $("#search"), results = $("#search-results");
+  let active = 0, shown = [];
+  function runSearch() {
+    const q = search.value.trim();
+    results.textContent = "";
+    if (!q) { results.hidden = true; return; }
+    shown = findFunctions(q, 40);
     active = 0;
     shown.forEach((f, i) => results.append(el("li", { class: i === 0 ? "active" : "", onmousedown: (e) => { e.preventDefault(); pick(i); } },
       el("span", { class: "icon " + f.k }, KIND_LETTER[f.k]), fnLabel(f), el("span", { class: "path" }, fileOf(f) + ":" + f.l))));
@@ -1199,6 +1352,10 @@
   $("#btn-back").addEventListener("click", () => history.back());
   $("#btn-fwd").addEventListener("click", () => history.forward());
   $("#btn-home").addEventListener("click", () => { location.hash = "#/"; });
+  $("#btn-path").addEventListener("click", () => {
+    const m = /^#\/f\/(\d+)/.exec(location.hash);
+    location.hash = "#/path/" + (m ? m[1] : "") + "/";
+  });
   $("#project-name").textContent = DATA.name;
   $("#stats").innerHTML = "";
   $("#stats").append(el("span", { class: "stats-text" }, DATA.stats.functions.toLocaleString() + " functions · " + DATA.stats.files.toLocaleString() + " files"));
