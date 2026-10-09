@@ -132,3 +132,18 @@ def test_complexity(graph):
     assert find("classify")["cx"] == 7  # 1 + if, and, elif, for, if, except
     assert find("label")["cx"] == 2  # nested function: 1 + ternary
     assert "cx" not in find("straight")  # 1 is left out of the data
+
+
+def test_import_bindings(graph):
+    _, find, targets = graph
+    assert targets(find("summary"), "clean") == ["clean"]
+    summary_clean = [c for c in find("summary")["calls"] if c["n"] == "clean"][0]
+    assert summary_clean["x"] == "h"
+    # `from other.text import clean` wins over pkg/helpers.clean in the same directory
+    data, _, _ = graph
+    target = data["funcs"][summary_clean["t"][0]]
+    assert data["files"][target["f"]]["p"] == "other/text.py"
+    assert targets(find("summary"), "dumps") == []  # `import json` is the standard library
+    # `import * as strings` -> util/strings.js, not the local pad()
+    pads = [c for c in find("row")["calls"] if c["n"] == "pad"]
+    assert [data["files"][data["funcs"][c["t"][0]]["f"]]["p"] for c in pads] == ["util/strings.js", "table.js"]

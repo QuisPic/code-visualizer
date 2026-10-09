@@ -93,7 +93,14 @@ Swift, Ruby, PHP, Lua.
 There is no type checker involved: a call is matched to function definitions **by name**, then
 ranked by how close each candidate is to the caller: `self`/`this` → same class, a matching
 qualifier (`ns::f`, `module.f`, `Class::f`), same file, the `.h`/`.cpp` pair, an imported or
-included file, same directory, nearest directory. In the page:
+included file, same directory, nearest directory.
+
+In Python and JavaScript/TypeScript, imports are followed first: `from .util import clean`,
+`import { render } from "./view"`, `import * as ns from "./x"` and `require("./x")` link a call
+straight to the file it was imported from. A Python call into a library (`json.dumps`,
+`from werkzeug.utils import send_file`) stays external even if the project has a function with that name.
+
+In the page:
 
 - solid links are confident,
 - **dashed** links (“guess”) were matched by name only. Untick *guesses* to hide them,

@@ -69,6 +69,9 @@ class FileInfo:
     imports: set[str]  # file stems / module names this file imports or includes
     functions: list[Function]
     classes: list[tuple[list[str], str]]  # (scope, class name) for constructor resolution
+    # local name -> (module spec, imported name or None for the module itself), e.g.
+    # `from .util import clean as c` -> {"c": (".util", "clean")}, `import * as ns from "./x"` -> {"ns": ("./x", None)}
+    bindings: dict[str, tuple[str, str | None]] = field(default_factory=dict)
 
 
 def _text(node: Node | None) -> str:
@@ -458,6 +461,80 @@ def _imports(source: bytes) -> set[str]:
     return stems
 
 
+def _string_value(node: Node | None) -> str | None:
+    if node is None or node.type != "string":
+        return None
+    frag = next((c for c in node.named_children if c.type == "string_fragment"), None)
+    return _text(frag) if frag is not None else None
+
+
+def _require_spec(node: Node | None) -> str | None:
+    """`require("./x")` -> "./x"."""
+    if node is None or node.type != "call_expression" or _text(node.child_by_field_name("function")) != "require":
+        return None
+    args = node.child_by_field_name("arguments")
+    return _string_value(args.named_children[0]) if args is not None and args.named_children else None
+
+
+def _bindings(lang: Language, root: Node) -> dict[str, tuple[str, str | None]]:
+    """Names that top-level imports bring into a Python or JS/TS file."""
+    out: dict[str, tuple[str, str | None]] = {}
+    for node in root.named_children:
+        t = node.type
+        if lang.family == "python" and t == "import_from_statement":
+            spec = _text(node.child_by_field_name("module_name")).replace(" ", "")
+            for i, child in enumerate(node.children):
+                if node.field_name_for_child(i) != "name":
+                    continue
+                if child.type == "aliased_import":
+                    out[_text(child.child_by_field_name("alias"))] = (spec, _text(child.child_by_field_name("name")))
+                else:
+                    out[_text(child)] = (spec, _text(child))
+        elif lang.family == "python" and t == "import_statement":
+            for i, child in enumerate(node.children):
+                if node.field_name_for_child(i) != "name":
+                    continue
+                if child.type == "aliased_import":
+                    out[_text(child.child_by_field_name("alias"))] = (_text(child.child_by_field_name("name")), None)
+                else:  # `import a.b` binds `a`; calls like `a.b.f()` are resolved through the qualifier
+                    name = _text(child)
+                    out[name.split(".")[0]] = (name.split(".")[0], None)
+        elif lang.family == "js" and t == "import_statement":
+            spec = _string_value(node.child_by_field_name("source"))
+            clause = next((c for c in node.named_children if c.type == "import_clause"), None)
+            if not spec or clause is None:
+                continue
+            for c in clause.named_children:
+                if c.type == "identifier":  # default import: assume it is named like the binding
+                    out[_text(c)] = (spec, _text(c))
+                elif c.type == "namespace_import":
+                    ident = next((x for x in c.named_children if x.type == "identifier"), None)
+                    if ident is not None:
+                        out[_text(ident)] = (spec, None)
+                elif c.type == "named_imports":
+                    for sp in c.named_children:
+                        if sp.type == "import_specifier":
+                            name = _text(sp.child_by_field_name("name"))
+                            out[_text(sp.child_by_field_name("alias") or sp.child_by_field_name("name"))] = (spec, name)
+        elif lang.family == "js" and t in ("lexical_declaration", "variable_declaration"):
+            for decl in node.named_children:
+                if decl.type != "variable_declarator":
+                    continue
+                spec = _require_spec(decl.child_by_field_name("value"))
+                target = decl.child_by_field_name("name")
+                if not spec or target is None:
+                    continue
+                if target.type == "identifier":
+                    out[_text(target)] = (spec, None)
+                elif target.type == "object_pattern":
+                    for c in target.named_children:
+                        if c.type == "shorthand_property_identifier_pattern":
+                            out[_text(c)] = (spec, _text(c))
+                        elif c.type == "pair_pattern":
+                            out[_text(c.child_by_field_name("value"))] = (spec, _text(c.child_by_field_name("key")))
+    return out
+
+
 def extract_file(lang: Language, parser, rel_path: str, source: bytes) -> FileInfo:
     tree = parser.parse(source)
     ex = _Extractor(lang, rel_path, source)
@@ -466,4 +543,5 @@ def extract_file(lang: Language, parser, rel_path: str, source: bytes) -> FileIn
     if ex.toplevel is not None:
         ex.toplevel.code = ""  # top-level code is shown via its call list only
         functions = [ex.toplevel] + functions
-    return FileInfo(rel_path, lang, source.count(b"\n") + 1, _imports(source), functions, ex.classes)
+    return FileInfo(rel_path, lang, source.count(b"\n") + 1, _imports(source), functions, ex.classes,
+                    _bindings(lang, tree.root_node))
