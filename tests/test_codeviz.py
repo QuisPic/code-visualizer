@@ -165,6 +165,8 @@ def test_changed_since(tmp_path):
     ch = {f["n"]: f.get("ch") for f in data["funcs"] if f["k"] != "toplevel"}
     assert ch == {"keep": None, "edit": "m", "fresh": "n"}
     assert data["changed"] == {"ref": "main", "functions": 2}
+
+
 def test_source_link(tmp_path):
     import subprocess
 
@@ -188,3 +190,26 @@ def test_source_link(tmp_path):
     sha = subprocess.run(["git", "-C", str(tmp_path), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
     assert source_link(tmp_path / "src") == f"https://github.com/me/repo/blob/{sha}/src/{{path}}#L{{line}}-L{{end}}"
     assert build(tmp_path, "t", [], quiet=True, link="x/{path}")["link"] == "x/{path}"
+
+
+def test_typed_receivers(graph):
+    data, find, _ = graph
+    funcs = data["funcs"]
+
+    def linked(caller, line):
+        (call,) = [c for c in caller["calls"] if c["l"] == line]
+        return [funcs[t]["s"] + "." + funcs[t]["n"] for t in call.get("t", [])], call.get("x")
+
+    drive = find("drive")
+    assert linked(drive, drive["l"] + 1) == (["Engine.ignite"], "h")
+    assert linked(drive, drive["l"] + 2) == (["Engine.ignite"], "h")
+    assert linked(drive, drive["l"] + 4) == (["Engine.ignite"], "h")
+    service = find("service")
+    assert linked(service, service["l"] + 2) == (["Engine.ignite"], "h")
+    ride = find("ride")
+    assert linked(ride, ride["l"] + 1) == (["Gear.spin"], "h")
+    assert linked(ride, ride["l"] + 2) == (["Wheel.spin"], "h")
+    assert linked(ride, ride["l"] + 4) == (["Wheel.spin"], "h")
+    fix = find("fix")
+    assert linked(fix, fix["l"] + 1) == (["Pump.inflate"], "h")
+    assert linked(fix, fix["l"] + 2) == (["Valve.inflate"], "h")
