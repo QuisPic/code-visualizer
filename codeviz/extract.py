@@ -254,7 +254,7 @@ class _Extractor:
 
     def _leading_comment(self, row: int) -> str:
         """The comment block that ends on the line right above `row` (0-based), if any."""
-        hash_comments = self.lang.family in ("python", "ruby", "php")  # `#include`, `#if`, `#!` elsewhere
+        hash_comments = self.lang.family in ("python", "ruby", "php")  # `#include`, `#if`, `#region` elsewhere
         lines: list[str] = []
         in_block = False
         r = row - 1

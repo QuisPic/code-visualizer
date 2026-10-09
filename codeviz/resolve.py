@@ -91,6 +91,7 @@ class Resolver:
                 self.bases[cls] += [b for b in names if b != cls and b not in self.bases[cls]]
         self._ancestors: dict[str, dict[str, int]] = {}
 
+
     def _qualifier(self, q: str | None, caller: Function) -> tuple[bool, bool, list[str], str]:
         """(self call, self member, qualifier parts, receiver name) for a call's qualifier, cached."""
         key = (q, caller.lang.name, caller.receiver)
