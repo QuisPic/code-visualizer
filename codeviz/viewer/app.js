@@ -1176,8 +1176,8 @@
   // ---------------------------------------------------------------- codebase map (treemap)
   // Squarified treemap of directories → files, area = lines of code. Directories are drawn as frames
   // with a title bar; clicking one zooms into it, clicking a file lists its functions.
-  const LANG_COLORS = { c: "#5c7cfa", cpp: "#4c6ef5", python: "#37b24d", javascript: "#f59f00", typescript: "#1c7ed6", tsx: "#1098ad",
-                        go: "#15aabf", rust: "#e8590c", java: "#d6336c", ruby: "#e03131", php: "#7048e8" };
+  const LANG_COLORS = { c: "#339af0", cpp: "#845ef7", python: "#40c057", javascript: "#f59f00", typescript: "#1098ad", tsx: "#0ca678",
+                        go: "#3bc9db", rust: "#e8590c", java: "#d6336c", ruby: "#e03131", php: "#5c7cfa" };
   function squarify(items, x, y, w, h) { // items: [{v}] sorted desc; returns [{item, x, y, w, h}]
     const out = [];
     let rest = items.slice(), total = rest.reduce((a, b) => a + b.v, 0);
