@@ -212,3 +212,10 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height:
   .panel.tree-panel.is-graph { width: auto; height: 55%; max-height: none; flex: none; }
 }
 .graph-wrap.dragging-node, .graph-wrap.dragging-node .gnode { cursor: grabbing; }
+.gnode.selected .box { stroke: var(--accent); stroke-width: 2.4; fill: var(--accent-bg); }
+.gnode.selected .glabel { fill: var(--accent); }
+.src-title { display: flex; align-items: baseline; gap: 4px; min-width: 0; flex: 1; white-space: nowrap; overflow: hidden; }
+.src-title .src-name { font: 600 12px var(--mono); text-transform: none; letter-spacing: 0; color: var(--fg); }
+.src-title .src-file { text-transform: none; letter-spacing: 0; font-weight: 400; overflow: hidden; text-overflow: ellipsis; }
+.src-title .src-open { text-transform: none; letter-spacing: 0; color: var(--accent); font-weight: 600; }
+.code-panel .pane-title > .opts { flex: none; }

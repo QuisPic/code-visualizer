@@ -345,7 +345,7 @@
 
   const G = { nodeH: 42, rowGap: 14, colGap: 70, maxLabel: 46, font: "", metaFont: "" };
 
-  function buildCallGraph(rootFn, dir, container, codeBox) {
+  function buildCallGraph(rootFn, dir, container, codeBox, showSource) {
     container.textContent = "";
     const mono = getComputedStyle(document.documentElement).getPropertyValue("--mono").trim();
     const sans = getComputedStyle(document.documentElement).getPropertyValue("--sans").trim();
@@ -488,7 +488,7 @@
       order.sort((a, b) => moved(a) - moved(b));
       for (const n of order) {
         const g = svg("g", { class: "gnode k-" + n.kind + (n.depth === 0 ? " root" : "") + (n.item.low ? " low" : "")
-          + (n.cycle ? " cycle" : "") });
+          + (n.cycle ? " cycle" : "") + (n.key === selectedKey ? " selected" : "") });
         g._node = n;
         g.append(svg("rect", { class: "box", width: n.w, height: G.nodeH, rx: 7 }));
         const tx0 = dir === "in" && n.expandable ? 14 : 0; // leave room for the left-side toggle
@@ -498,8 +498,8 @@
         const isFn = n.item.type === "fn";
         const tip = n.kind === "ext" ? "Not defined in this codebase" : n.kind === "amb" ? "Several functions share this name"
           : qname(FUNCS[n.item.id]) + "\n" + fileOf(FUNCS[n.item.id]) + ":" + FUNCS[n.item.id].l;
-        const how = [n.expandable ? "click to " + (n.open ? "collapse" : "expand") : null,
-                     isFn && n.depth ? "double-click to open" : null, "drag to move"].filter(Boolean).join(" · ");
+        const how = ["click to see its code", isFn && n.depth ? "double-click to open" : null,
+                     n.expandable ? "+ to " + (n.open ? "collapse" : "expand") : null, "drag to move"].filter(Boolean).join(" · ");
         g.append(svg("title", null, tip + "\n\n" + how[0].toUpperCase() + how.slice(1)));
         if (n.expandable) {
           const tx = dir === "out" ? n.w - 2 : 2;
@@ -509,12 +509,12 @@
         g.addEventListener("mouseenter", () => {
           if (drag && drag.moved) return;
           markPath(n);
-          if (n.depth === 1 && dir === "out") highlightLines(codeBox, n.item.lines, true);
+          if (n.depth === 1 && dir === "out" && showingRoot()) highlightLines(codeBox, n.item.lines, true);
         });
         g.addEventListener("mouseleave", () => {
           if (drag && drag.moved) return;
           for (const p of svgEl.querySelectorAll(".hot")) p.classList.remove("hot");
-          if (n.depth === 1 && dir === "out") highlightLines(codeBox, [], false);
+          if (n.depth === 1 && dir === "out" && showingRoot()) highlightLines(codeBox, [], false);
         });
         n.g = g;
         nodeLayer.append(g);
@@ -588,7 +588,7 @@
       if (e.button !== 0) return;
       const g = e.target.closest(".gnode");
       const n = g ? g._node : null;
-      drag = { n, x: e.clientX, y: e.clientY, id: e.pointerId, moved: false,
+      drag = { n, onToggle: !!e.target.closest(".toggle"), x: e.clientX, y: e.clientY, id: e.pointerId, moved: false,
                vx: view.x, vy: view.y, dx: n ? n.dx || 0 : 0, dy: n ? n.dy || 0 : 0 };
     });
     svgEl.addEventListener("pointermove", (e) => {
@@ -612,16 +612,26 @@
       drag = null;
       wrap.classList.remove("panning", "dragging-node");
       if (!d || d.moved || !d.n) return;
-      const n = d.n, now = performance.now();
+      const n = d.n;
+      if (d.onToggle) { lastTap = null; toggle(n); return; }
+      const now = performance.now();
       const isDouble = lastTap && lastTap.key === n.key && now - lastTap.t < 400;
       lastTap = isDouble ? null : { key: n.key, t: now };
-      if (isDouble) {
-        if (n.item.type === "fn" && n.depth > 0) go(n.item.id, dir);
-        else if (n.expandable && n.item.type === "fn") toggle(n); // root: undo the first click's toggle
-        return;
-      }
-      toggle(n);
+      if (isDouble && n.item.type === "fn" && n.depth > 0) go(n.item.id, dir);
+      else select(n);
     };
+    // selecting a node shows its code in the Source panel
+    let selectedKey = root.key;
+    const showingRoot = () => +codeBox.dataset.fn === rootFn.id;
+    function select(n) {
+      selectedKey = n.key;
+      for (const g of nodeLayer.querySelectorAll(".gnode.selected")) g.classList.remove("selected");
+      n.g.classList.add("selected");
+      if (n.item.type === "fn") { showSource(n.item.id); return; }
+      showSource(null, n.item.type === "amb"
+        ? n.item.targets.length + " functions are named " + n.label + " — expand the node with + to see them, then select one."
+        : n.label + " is not defined in this codebase (library, built-in or unresolved), so there is no code to show.");
+    }
     svgEl.addEventListener("pointerup", endDrag);
     svgEl.addEventListener("pointercancel", () => { drag = null; wrap.classList.remove("panning", "dragging-node"); });
     svgEl.addEventListener("wheel", (e) => { // wheel / pinch zooms around the cursor, shift+wheel scrolls sideways
@@ -762,7 +772,9 @@
     const renderTree = () => {
       treeBox.className = prefs.view === "list" ? "panel-scroll" : "graph-box";
       treePanel.classList.toggle("is-graph", prefs.view !== "list");
-      (prefs.view === "list" ? buildCallTree : buildCallGraph)(f, dir, treeBox, codeBox);
+      showSource(f.id);
+      if (prefs.view === "list") buildCallTree(f, dir, treeBox, codeBox);
+      else buildCallGraph(f, dir, treeBox, codeBox, showSource);
     };
     const opt = (key, label, title) => el("label", { title },
       el("input", { type: "checkbox", checked: prefs[key], onchange: (e) => { prefs[key] = e.target.checked; savePrefs(); renderTree(); } }), label);
@@ -779,8 +791,28 @@
         dir === "out" ? opt("ext", "external", "Show calls to functions that are not defined in this codebase") : null,
         dir === "out" ? opt("low", "guesses", "Show links resolved by name only (lower confidence)") : null)), treeBox);
     const split = el("div", { class: "splitter" });
-    codePanel.append(el("div", { class: "pane-title" }, el("span", null, "Source"),
-      el("span", { class: "opts muted" }, "click a highlighted call to follow it")), codeBox);
+    const srcTitle = el("span", { class: "src-title" });
+    codePanel.append(el("div", { class: "pane-title" }, srcTitle,
+      el("span", { class: "opts muted" }, "click a call to follow it")), codeBox);
+    // fid = function to show; or null with a note (external / ambiguous graph nodes)
+    function showSource(fid, note) {
+      srcTitle.textContent = "";
+      if (fid == null) {
+        delete codeBox.dataset.fn;
+        codeBox.textContent = "";
+        codeBox.append(el("div", { class: "empty-note" }, note));
+        srcTitle.append("Source");
+        return;
+      }
+      const sf = FUNCS[fid];
+      codeBox.dataset.fn = fid;
+      renderCode(sf, codeBox);
+      codeBox.scrollTop = 0;
+      if (fid === f.id) { srcTitle.append("Source"); return; }
+      srcTitle.append("Source · ", el("span", { class: "src-name" }, sf.n + "()"), " ",
+        el("span", { class: "muted src-file" }, fileOf(sf) + ":" + sf.l), " ",
+        el("button", { class: "link-btn src-open", title: "Make this the graph's main function", onclick: () => go(fid, dir) }, "open ↗"));
+    }
     body.append(treePanel, split, codePanel);
     main.append(body);
     if (prefs.treeW) treePanel.style.width = prefs.treeW + "px";
@@ -788,7 +820,6 @@
       const w = Math.max(220, x - treePanel.getBoundingClientRect().left);
       treePanel.style.width = w + "px"; prefs.treeW = w; savePrefs();
     });
-    renderCode(f, codeBox);
     renderTree();
     revealInExplorer(f);
   }
@@ -832,7 +863,7 @@
         card(s.resolved, "linked to code here"), card(s.external, "external / library")),
       el("p", { class: "help" }, "Pick a function in the explorer or search with ", el("kbd", null, "/"),
         ". The graph shows the function as a node linked to every function it calls (switch to ", el("b", null, "Callers"),
-        " for the reverse). Click a node to expand it, double-click it to open that function, drag nodes to move them, drag the background to pan, scroll to zoom, and use ", el("kbd", null, "Alt"), "+",
+        " for the reverse). Click a node to see its code, expand it with +, double-click it to open that function, drag nodes to move them, drag the background to pan, scroll to zoom, and use ", el("kbd", null, "Alt"), "+",
         el("kbd", null, "←"), " to go back. Calls in the source are links too. Links are resolved by name, so ",
         el("span", { style: "color:var(--warn)" }, "amber"), " marks a name with several candidates and dashed underlines mark best guesses."),
       entries.length ? el("h2", null, "Entry points (not called from anywhere, ranked by how much they reach)") : null,

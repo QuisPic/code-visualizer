@@ -14,8 +14,8 @@ Open the generated `<name>-codeviz.html` in a browser. No server, no internet ne
 
 - **Explorer** (left): directories → files → classes/namespaces → functions.
 - **Call graph** (middle): the selected function as a node, connected by lines to the functions
-  it calls. Click a node to expand it and follow its calls as deep as you like, double-click it to
-  open that function, drag nodes to rearrange them (a node's subtree moves with it; **Tidy** puts
+  it calls. Click a node to see its code on the right, expand it with **+** to follow its calls as
+  deep as you like, double-click it to open that function, drag nodes to rearrange them (a node's subtree moves with it; **Tidy** puts
   them back), drag the background to pan, scroll to zoom. Switch to **Callers** to grow the graph the other
   way, or to **List** for an indented-tree view. Recursion is marked instead of expanding forever.
 - **Source** (right): the function's code with syntax highlighting. Every call that leads to a
