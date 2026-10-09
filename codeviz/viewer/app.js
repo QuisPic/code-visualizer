@@ -2169,8 +2169,8 @@
     const box = el("div", { class: "hotspots" });
     box.append(el("h2", null, "Hotspots (changed most often since " + DATA.churn.since + ", weighted by size)"));
     if (!rows.length) {
-      box.append(el("p", { class: "muted" }, DATA.churn.commits ? "No file changed more than once." :
-        "No git history found (a shallow clone or not a git work tree)."));
+      box.append(el("p", { class: "muted" }, DATA.churn.commits > 1 ? "No file changed more than once." :
+        "Not enough git history (a shallow clone, or not a git work tree)."));
       return box;
     }
     const top = rows[0].score;
