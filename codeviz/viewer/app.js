@@ -1223,7 +1223,8 @@
     if (scopes.has("")) addFns(ul, scopes.get(""));
     for (const [s, list] of scopes) {
       if (!s) continue;
-      const item = explorerItem("s:" + fi + ":" + s, "scope", "{}", s, String(list.length), (cu) => addFns(cu, list));
+      const item = explorerItem("s:" + fi + ":" + s, "scope", "{}", s, String(list.length), (cu) => addFns(cu, list),
+        () => { item.open(true); goClass(list[0]); });
       if (list.some((f) => f.ch)) item.row.append(chDot(null, "has changes"));
       ul.append(item.li);
     }
@@ -1343,6 +1344,7 @@
         el("span", { class: "mono" }, fileOf(f) + ":" + f.l + (f.e > f.l ? "–" + f.e : "")),
         DATA.link ? el("a", { class: "web-link", href: webLink(f), target: "_blank", rel: "noopener", title: "Open these lines on " + LINK_HOST }, "↗ " + LINK_HOST) : null,
         el("span", null, f.k),
+        f.s && f.k !== "toplevel" ? el("a", { href: classHash(f), title: "Everything in " + f.s + " and what uses it" }, "{} " + f.s) : null,
         el("span", null, "calls " + nCallees + " function" + (nCallees === 1 ? "" : "s") + (nExt ? " (+" + nExt + " external)" : "")),
         el("span", null, "called from " + callers[id].length + " place" + (callers[id].length === 1 ? "" : "s")),
         f.k === "toplevel" ? null : complexityTag(f),
@@ -1683,6 +1685,89 @@
       group.append(grepLine(hit));
     }
     main.append(box);
+  }
+
+  // ---------------------------------------------------------------- class view (#/class/<file>/<scope>)
+  // A class is a scope within one file; in C/C++ it also takes in out-of-line members from other files.
+  const classHash = (f) => "#/class/" + f.f + "/" + encodeURIComponent(f.s);
+  const goClass = (f) => { location.hash = classHash(f); };
+  function classMembers(fi, scope) {
+    const fam = FAMILY[FILES[fi].lang];
+    return FUNCS.filter((g) => g.s === scope && g.k !== "toplevel" && (g.f === fi || (fam === "c" && FAMILY[FILES[g.f].lang] === "c")))
+      .sort((a, b) => (a.f === fi ? 0 : 1) - (b.f === fi ? 0 : 1) || fileOf(a).localeCompare(fileOf(b)) || a.l - b.l);
+  }
+  function showClass(fi, scope) {
+    const members = FILES[fi] ? classMembers(fi, scope) : [];
+    if (!members.length) return showOverview();
+    document.title = scope + " · " + DATA.name;
+    main.textContent = "";
+    revealInExplorer(members[0]);
+    for (const r of explorer.querySelectorAll(".row.selected")) r.classList.remove("selected");
+    const n = explorerNodes.get("s:" + fi + ":" + scope);
+    if (n) n.row.classList.add("selected");
+    const inClass = new Set(members.map((m) => m.id));
+    // other side of each call crossing the class boundary, grouped by that side's class (or file)
+    const groupKey = (g) => (g.s && g.k !== "toplevel" ? "s" + g.f + "\0" + g.s : "f" + g.f);
+    const usedBy = new Map(), uses = new Map();
+    let internal = 0;
+    const add = (map, other, member, line, caller) => {
+      const k = groupKey(other);
+      if (!map.has(k)) map.set(k, { other, pairs: [], n: 0 });
+      const grp = map.get(k);
+      grp.n++;
+      grp.pairs.push({ other, member, line, caller });
+    };
+    for (const m of members) {
+      for (const c of callers[m.id]) if (!inClass.has(c.from)) add(usedBy, FUNCS[c.from], m, c.line, c.from);
+      for (const c of m.calls) {
+        if (!c.t || c.x === "a" || (c.x === "l" && !prefs.low)) continue;
+        if (inClass.has(c.t[0])) internal++; else add(uses, FUNCS[c.t[0]], m, c.l, m.id);
+      }
+    }
+    const groupList = (map, dir) => {
+      const box = el("div", { class: "cls-groups" });
+      const groups = [...map.values()].sort((a, b) => b.n - a.n);
+      if (!groups.length) box.append(el("div", { class: "muted" }, dir === "in" ? "Nothing outside the class calls it." : "Calls nothing outside the class."));
+      for (const g of groups) {
+        const o = g.other, isCls = o.s && o.k !== "toplevel";
+        const head = el("summary", null,
+          el("span", { class: "icon " + (isCls ? "scope" : "file") }, isCls ? "{}" : "▫"),
+          el("span", { class: "label" }, isCls ? o.s : fileOf(o).split("/").pop()),
+          el("span", { class: "badge" }, g.n + " call" + (g.n === 1 ? "" : "s")),
+          el("span", { class: "meta" }, fileOf(o)),
+          isCls ? el("a", { class: "cls-open", href: classHash(o), title: "Open this class", onclick: (e) => e.stopPropagation() }, "open") : null);
+        const ul = el("ul", { class: "tree" });
+        const seen = new Set();
+        for (const p of g.pairs) {
+          const key = p.other.id + ":" + p.member.id;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          const [a, b] = dir === "in" ? [p.other, p.member] : [p.member, p.other];
+          ul.append(el("li", null, el("div", { class: "row", onclick: () => go(p.caller) },
+            fnLabel(a, false), el("span", { class: "muted" }, " → "), fnLabel(b, dir === "out"))));
+        }
+        box.append(el("details", null, head, ul));
+      }
+      return box;
+    };
+    const memberList = el("ul", { class: "tree" });
+    for (const m of members) {
+      const outside = callers[m.id].filter((c) => !inClass.has(c.from)).length;
+      memberList.append(el("li", null, el("div", { class: "row", onclick: () => go(m.id), title: fileOf(m) + ":" + m.l },
+        el("span", { class: "icon " + m.k }, KIND_LETTER[m.k]), fnLabel(m, false),
+        el("span", { class: "badge", title: "calls from outside the class" }, outside + " in"),
+        el("span", { class: "meta" }, (m.f !== fi ? fileOf(m) : "") + ":" + m.l))));
+    }
+    const lines = members.reduce((n, m) => n + m.e - m.l + 1, 0);
+    const files = [...new Set(members.map(fileOf))];
+    main.append(el("div", { class: "overview cls" },
+      el("h1", null, el("span", { class: "icon scope" }, "{}"), " ", scope),
+      el("div", { class: "muted" }, files.join(", ") + " · " + members.length + " member" + (members.length === 1 ? "" : "s") + " · "
+        + lines.toLocaleString() + " lines · " + internal + " call" + (internal === 1 ? "" : "s") + " between members"),
+      el("div", { class: "cls-cols" },
+        el("section", null, el("h2", null, "Used by (" + usedBy.size + ")"), groupList(usedBy, "in")),
+        el("section", null, el("h2", null, "Members"), memberList),
+        el("section", null, el("h2", null, "Uses (" + uses.size + ")"), groupList(uses, "out")))));
   }
 
   function showOverview() {
@@ -2080,11 +2165,13 @@
     hidePopup(); hideCard();
     const g = /^#\/grep\/(.+)/.exec(location.hash);
     const m = /^#\/f\/(\d+)(?:\/(in|both|impact))?/.exec(location.hash);
+    const c = /^#\/class\/(\d+)\/(.+)/.exec(location.hash);
     const deps = /^#\/deps(?:\/(\d+))?/.exec(location.hash);
     const p = /^#\/path\/(\d*)\/(\d*)/.exec(location.hash);
     if (m) showFunction(+m[1], m[2] || "out");
     else if (p) showPath(p[1] === "" ? null : +p[1], p[2] === "" ? null : +p[2]);
     else if (deps) showDeps(deps[1] ? +deps[1] : 0);
+    else if (c) showClass(+c[1], decodeURIComponent(c[2]));
     else if (g) showGrep(decodeURIComponent(g[1]));
     else showOverview();
     main.scrollTop = 0;

@@ -44,6 +44,9 @@ Open the generated `<name>-codeviz.html` in a browser. No server, no internet ne
 - **Code search**: in the search box, press `Shift+Enter` (or pick *Search code for…*) to list every line
   of function code that contains the text, grouped by function, with the match highlighted. Wrap the
   query in `/…/` for a regular expression. Click a line to open the function at that line.
+- **Class view**: click a class in the Explorer (or the `{} Class` link under a function's name) to see
+  all its members, which classes and files call into it, and which ones it calls, with the exact
+  calls one click away. In C/C++ out-of-line members from the `.cpp` are included.
 - **Search** (`/` or `Ctrl+K`): fuzzy, like an editor's file finder: `gms` finds `getMaterialState`,
   several words narrow it down (`surface flat`), and file names are listed too (picking one opens it in
   the Explorer).
