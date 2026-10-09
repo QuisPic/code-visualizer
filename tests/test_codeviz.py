@@ -213,3 +213,11 @@ def test_typed_receivers(graph):
     fix = find("fix")
     assert linked(fix, fix["l"] + 1) == (["Pump.inflate"], "h")
     assert linked(fix, fix["l"] + 2) == (["Valve.inflate"], "h")
+
+
+def test_inherited_methods(graph):
+    data, find, targets = graph
+    assert targets(find("press"), "redraw") == ["Widget.redraw"]
+    assert targets(find("boot"), "calibrate") == ["Sensor.calibrate"]
+    confidences = {c["x"] for f in (find("press"), find("boot")) for c in f["calls"]}
+    assert confidences == {"h"}
