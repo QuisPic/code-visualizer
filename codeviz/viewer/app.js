@@ -504,6 +504,11 @@
   const measureCtx = document.createElement("canvas").getContext("2d");
   function textWidth(text, font) { measureCtx.font = font; return measureCtx.measureText(text).width; }
   const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
+  function download(blob, name) {
+    const a = el("a", { href: URL.createObjectURL(blob), download: name });
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
 
   const G = { nodeH: 42, rowGap: 14, colGap: 70, maxLabel: 46, font: "", metaFont: "", sans: "" };
 
@@ -590,6 +595,7 @@
       el("button", { title: "Expand one more level", onclick: () => expandLevel() }, "Expand"),
       el("button", { title: "Collapse to the first level", onclick: () => collapseAll() }, "Collapse"),
       el("button", { title: "Put dragged nodes back in their places", onclick: () => tidy() }, "Tidy"),
+      el("button", { title: "Save the graph as an image", onclick: (e) => exportMenu(e.currentTarget) }, "Export"),
       el("button", { title: "What the colours and lines mean", class: prefs.legend ? "on" : null, onclick: (e) => {
         prefs.legend = !prefs.legend; savePrefs(); legend.hidden = !prefs.legend; e.currentTarget.classList.toggle("on", prefs.legend);
       } }, "?"));
@@ -770,6 +776,91 @@
         x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x + n.w); y1 = Math.max(y1, y + G.nodeH);
       }
       return { x0, y0, x1, y1 };
+    }
+    // ---- export: a standalone copy of the graph with its styles inlined, as SVG or PNG
+    function exportMenu(btn) {
+      const old = wrap.querySelector(".export-menu");
+      if (old) { old.remove(); return; }
+      const base = (qname(rootFn) + (dir === "in" ? "-callers" : "-calls")).replace(/[^\w.-]+/g, "_");
+      const close = () => { menu.remove(); document.removeEventListener("pointerdown", outside, true); };
+      const outside = (e) => { if (!menu.contains(e.target) && e.target !== btn) close(); };
+      const item = (label, fn) => el("button", { onclick: () => { close(); fn(); } }, label);
+      const menu = el("div", { class: "export-menu" },
+        item("SVG (vector, for docs)", () => download(new Blob([exportSvg()], { type: "image/svg+xml" }), base + ".svg")),
+        item("PNG (2× resolution)", () => exportPng((blob) => download(blob, base + ".png"))),
+        item("Mermaid (copy for Markdown)", () => copyText("```mermaid\n" + exportMermaid() + "```\n", base + ".md")));
+      tools.append(menu);
+      document.addEventListener("pointerdown", outside, true);
+    }
+    // Mermaid flowchart of the visible graph; GitHub, GitLab and most wikis render it in Markdown
+    function exportMermaid() {
+      const out = ["flowchart " + (dir === "out" ? "LR" : "RL")];
+      const q = (t) => '"' + t.replace(/"/g, "#quot;") + '"';
+      // a function shown in several branches becomes one Mermaid node, so the export is a real graph
+      const ids = new Map(), idOf = (n) => ids.get(n.item.type === "fn" ? "f" + n.item.id : n.key);
+      const nodes = [...positions.values()].map((p) => p.n).sort((a, b) => a.depth - b.depth || positions.get(a.key).y - positions.get(b.key).y);
+      for (const n of nodes) {
+        const key = n.item.type === "fn" ? "f" + n.item.id : n.key;
+        if (ids.has(key)) continue;
+        ids.set(key, "n" + ids.size);
+        const label = n.kind === "amb" ? n.label + " (" + n.meta + ")" : n.label;
+        out.push("  " + ids.get(key) + (n.kind === "amb" ? "{{" + q(label) + "}}" : "[" + q(label) + "]")
+          + (n.kind === "ext" ? ":::ext" : n.depth === 0 ? ":::root" : ""));
+      }
+      const edges = new Set();
+      for (const n of nodes) {
+        if (!n.parent) continue;
+        const [a, b] = dir === "out" ? [n.parent, n] : [n, n.parent];
+        const times = n.item.lines && n.item.lines.length > 1 ? "|" + q("×" + n.item.lines.length) + "|" : "";
+        const line = "  " + idOf(a) + (n.item.low ? " -.->" : " -->") + times + " " + idOf(b);
+        if (!edges.has(line)) { edges.add(line); out.push(line); }
+      }
+      out.push("  classDef root stroke-width:3px", "  classDef ext stroke-dasharray:4 3,color:#888");
+      return out.join("\n") + "\n";
+    }
+    function copyText(text, fallbackName) {
+      const note = (msg) => {
+        const t = el("span", { class: "export-note" }, msg);
+        tools.append(t); setTimeout(() => t.remove(), 1800);
+      };
+      const save = () => { download(new Blob([text], { type: "text/markdown" }), fallbackName); note("Saved " + fallbackName); };
+      if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(() => note("Copied to clipboard"), save);
+      else save();
+    }
+    const STYLE_PROPS = ["fill", "fill-opacity", "stroke", "stroke-width", "stroke-dasharray", "stroke-opacity", "opacity",
+                         "font-family", "font-size", "font-weight", "display"];
+    function exportSvg() {
+      const b = bounds(), pad = 16;
+      const w = Math.ceil(b.x1 - b.x0 + 2 * pad), h = Math.ceil(b.y1 - b.y0 + 2 * pad);
+      const out = svgEl.cloneNode(true);
+      // copy computed styles onto the clone, since the page's stylesheet does not travel with the file
+      const src = [svgEl, ...svgEl.querySelectorAll("*")], dst = [out, ...out.querySelectorAll("*")];
+      src.forEach((node, i) => {
+        const cs = getComputedStyle(node);
+        const style = STYLE_PROPS.map((p) => p + ":" + cs.getPropertyValue(p)).join(";");
+        dst[i].setAttribute("style", style);
+        dst[i].removeAttribute("class");
+      });
+      for (const t of out.querySelectorAll("title")) t.remove();
+      out.setAttribute("xmlns", SVGNS);
+      out.setAttribute("width", w); out.setAttribute("height", h);
+      out.setAttribute("viewBox", `0 0 ${w} ${h}`);
+      out.firstChild.setAttribute("transform", `translate(${pad - b.x0},${pad - b.y0})`);
+      const bg = getComputedStyle(document.body).backgroundColor;
+      out.insertBefore(svg("rect", { width: w, height: h, fill: bg }), out.firstChild);
+      return '<?xml version="1.0" encoding="UTF-8"?>\n' + new XMLSerializer().serializeToString(out);
+    }
+    function exportPng(done) {
+      const text = exportSvg();
+      const img = new Image();
+      img.onload = () => {
+        const scale = 2, c = document.createElement("canvas");
+        c.width = img.width * scale; c.height = img.height * scale;
+        const ctx = c.getContext("2d");
+        ctx.scale(scale, scale); ctx.drawImage(img, 0, 0);
+        c.toBlob(done, "image/png");
+      };
+      img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(text);
     }
     function fit() {
       const b = bounds(), W = wrap.clientWidth || 600, H = wrap.clientHeight || 400, pad = 24;
