@@ -219,3 +219,21 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height:
 .src-title .src-file { text-transform: none; letter-spacing: 0; font-weight: 400; overflow: hidden; text-overflow: ellipsis; }
 .src-title .src-open { text-transform: none; letter-spacing: 0; color: var(--accent); font-weight: 600; }
 .code-panel .pane-title > .opts { flex: none; }
+
+/* hover cards */
+.hovercard { position: fixed; z-index: 40; max-width: min(520px, calc(100vw - 16px)); padding: 9px 11px 8px; background: var(--bg);
+  border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,.2); pointer-events: none; font-size: 12px; }
+.hovercard > * + * { margin-top: 6px; }
+.hc-head { display: flex; align-items: center; gap: 6px; font: 600 13px var(--mono); min-width: 0; }
+.hc-head .label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hc-file { color: var(--muted); font: 11px var(--mono); margin-top: 2px; word-break: break-all; }
+.hc-sig { display: block; font: 11.5px/1.5 var(--mono); white-space: pre-wrap; word-break: break-word; background: var(--bg-2);
+  border: 1px solid var(--border); border-radius: 5px; padding: 4px 7px; max-height: 7.5em; overflow: hidden; }
+.hc-doc { white-space: pre-wrap; color: var(--fg); opacity: .85; line-height: 1.45; max-height: 10em; overflow: hidden; }
+.hc-stats { display: flex; gap: 14px; color: var(--muted); }
+.hc-stats b { color: var(--fg); font-weight: 600; }
+.hc-note { color: var(--muted); }
+.hc-note.warn { color: var(--warn); }
+.hc-list { list-style: none; margin: 0; padding: 0; font: 12px/1.6 var(--mono); }
+.hc-list .muted { font: 11px var(--sans); }
+.hc-hint { color: var(--muted); font-size: 11px; border-top: 1px solid var(--border); padding-top: 5px; }

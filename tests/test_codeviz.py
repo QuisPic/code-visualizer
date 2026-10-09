@@ -68,6 +68,15 @@ def test_toplevel_calls(graph):
     assert targets(find("(top level)", "ui.js"), "start") == ["start"]
 
 
+def test_doc_comments(graph):
+    _, find, _ = graph
+    assert find("format_greeting")["d"] == "Build the greeting text.\n\nThe name is cleaned first."
+    assert find("total")["d"] == "Sum of the areas of `n` shapes."
+    assert find("start")["d"] == "Create a counter and bump it once."
+    assert "d" not in find("main", "shapes.cpp")  # `}` of the namespace above is not a comment
+    assert "d" not in find("area")  # #include lines above are not comments in C
+
+
 def test_cli_writes_self_contained_html(tmp_path):
     out = tmp_path / "out.html"
     assert main([str(FIXTURE), "-o", str(out), "-q", "--json"]) == 0

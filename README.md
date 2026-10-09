@@ -20,6 +20,9 @@ Open the generated `<name>-codeviz.html` in a browser. No server, no internet ne
   way, or to **List** for an indented-tree view. Recursion is marked instead of expanding forever.
 - **Source** (right): the function's code with syntax highlighting. Every call that leads to a
   function in the codebase is a link. Hovering a node in the graph highlights where that call happens.
+- **Hover cards**: rest the pointer on a call in the source, a graph node or a function in a list to
+  see its signature, the comment or docstring above it, where it lives and how many callers and callees
+  it has.
 - **Search** (`/`), back/forward (`Alt+←/→` or the browser buttons; every view has its own URL),
   light/dark theme, and an overview page listing entry points and the most-called functions.
 
