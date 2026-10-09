@@ -408,13 +408,14 @@
       el("button", { title: "Zoom out", onclick: () => zoomBy(0.8) }, "−"),
       el("button", { title: "Fit to view", onclick: () => fit() }, "Fit"),
       el("button", { title: "Expand one more level", onclick: () => expandLevel() }, "Expand"),
-      el("button", { title: "Collapse to the first level", onclick: () => collapseAll() }, "Collapse"));
+      el("button", { title: "Collapse to the first level", onclick: () => collapseAll() }, "Collapse"),
+      el("button", { title: "Put dragged nodes back in their places", onclick: () => tidy() }, "Tidy"));
     wrap.append(svgEl, tools);
     container.append(wrap);
     let view = { x: 0, y: 0, k: 1 };
     const applyView = () => viewport.setAttribute("transform", `translate(${view.x},${view.y}) scale(${view.k})`);
 
-    let positions = new Map(); // key -> {x, y, n}
+    let positions = new Map(); // key -> {x, y, n}: tidy-tree layout, before any dragging
     function layout() {
       // column widths per depth, rows by leaf count (tidy tree)
       const colW = [];
@@ -439,74 +440,96 @@
       };
       place(root);
     }
+    // where a node is drawn: its layout slot plus its own and its ancestors' drag offsets
+    // (dragging a node carries its subtree along)
+    function pos(n) {
+      const p = positions.get(n.key);
+      let x = p.x, y = p.y;
+      for (let a = n; a; a = a.parent) { x += a.dx || 0; y += a.dy || 0; }
+      return { x, y };
+    }
+    const visibleKids = (n) => (n.open ? children(n) : []);
+
+    function edgePath(n) {
+      const p = pos(n.parent), c = pos(n);
+      const cy = c.y + G.nodeH / 2, py = p.y + G.nodeH / 2;
+      const x1 = dir === "out" ? p.x + n.parent.w : p.x, x2 = dir === "out" ? c.x : c.x + n.w;
+      const mx = (x1 + x2) / 2;
+      return { d: `M${x1},${py} C${mx},${py} ${mx},${cy} ${x2},${cy}`, x2, cy };
+    }
+    function placeNode(n) {
+      const c = pos(n);
+      n.g.setAttribute("transform", `translate(${c.x},${c.y})`);
+      if (n.edge) {
+        const e = edgePath(n);
+        n.edge.setAttribute("d", e.d);
+        if (n.edgeLabel) { n.edgeLabel.setAttribute("x", e.x2 + (dir === "out" ? -6 : 6)); n.edgeLabel.setAttribute("y", e.cy - 5); }
+      }
+    }
+    function raise(n) { nodeLayer.append(n.g); for (const k of visibleKids(n)) raise(k); }
+    function placeSubtree(n) { placeNode(n); for (const k of visibleKids(n)) placeSubtree(k); }
 
     function draw() {
       edgeLayer.textContent = ""; nodeLayer.textContent = "";
-      for (const { x, y, n } of positions.values()) {
+      for (const { n } of positions.values()) {
+        n.edge = n.edgeLabel = null;
         if (!n.parent) continue;
-        const pp = positions.get(n.parent.key);
-        const cy = y + G.nodeH / 2, py = pp.y + G.nodeH / 2;
-        const x1 = dir === "out" ? pp.x + pp.n.w : pp.x, x2 = dir === "out" ? x : x + n.w;
-        const mx = (x1 + x2) / 2;
         const cls = "edge" + (n.kind === "ext" ? " ext" : "") + (n.item.low ? " low" : "") + (n.kind === "amb" ? " amb" : "");
-        edgeLayer.append(svg("path", { class: cls, d: `M${x1},${py} C${mx},${py} ${mx},${cy} ${x2},${cy}` }));
+        n.edge = svg("path", { class: cls });
+        edgeLayer.append(n.edge);
         if (n.item.lines && n.item.lines.length > 1) {
-          edgeLayer.append(svg("text", { class: "edge-label", x: x2 + (dir === "out" ? -6 : 6), y: cy - 5,
-            "text-anchor": dir === "out" ? "end" : "start" }, "×" + n.item.lines.length));
+          n.edgeLabel = svg("text", { class: "edge-label", "text-anchor": dir === "out" ? "end" : "start" }, "×" + n.item.lines.length);
+          edgeLayer.append(n.edgeLabel);
         }
       }
-      for (const { x, y, n } of positions.values()) {
+      // nodes that were dragged are drawn last so they sit on top of the ones they were dropped on
+      const moved = (n) => { for (let a = n; a; a = a.parent) if (a.dx || a.dy) return true; return false; };
+      const order = [...positions.values()].map((p) => p.n);
+      order.sort((a, b) => moved(a) - moved(b));
+      for (const n of order) {
         const g = svg("g", { class: "gnode k-" + n.kind + (n.depth === 0 ? " root" : "") + (n.item.low ? " low" : "")
-          + (n.cycle ? " cycle" : ""), transform: `translate(${x},${y})` });
+          + (n.cycle ? " cycle" : "") });
+        g._node = n;
         g.append(svg("rect", { class: "box", width: n.w, height: G.nodeH, rx: 7 }));
         const tx0 = dir === "in" && n.expandable ? 14 : 0; // leave room for the left-side toggle
         g.append(svg("rect", { class: "stripe", width: 4, height: G.nodeH - 10, x: tx0, y: 5, rx: 2 }));
         g.append(svg("text", { class: "glabel", x: tx0 + 12, y: 17 }, n.label));
         g.append(svg("text", { class: "gmeta", x: tx0 + 12, y: 33 }, n.cycle ? "↻ recursive · " + n.meta : n.item.low ? "guess · " + n.meta : n.meta));
+        const isFn = n.item.type === "fn";
         const tip = n.kind === "ext" ? "Not defined in this codebase" : n.kind === "amb" ? "Several functions share this name"
           : qname(FUNCS[n.item.id]) + "\n" + fileOf(FUNCS[n.item.id]) + ":" + FUNCS[n.item.id].l;
-        g.append(svg("title", null, tip + (n.depth && n.kind !== "ext" && n.kind !== "amb" ? "\n\nClick to open" : "")));
+        const how = [n.expandable ? "click to " + (n.open ? "collapse" : "expand") : null,
+                     isFn && n.depth ? "double-click to open" : null, "drag to move"].filter(Boolean).join(" · ");
+        g.append(svg("title", null, tip + "\n\n" + how[0].toUpperCase() + how.slice(1)));
         if (n.expandable) {
           const tx = dir === "out" ? n.w - 2 : 2;
-          const t = svg("g", { class: "toggle", transform: `translate(${tx},${G.nodeH / 2})` },
-            svg("circle", { r: 9 }), svg("text", { "text-anchor": "middle", y: 4 }, n.open ? "−" : "+"));
-          t.addEventListener("click", (e) => { e.stopPropagation(); toggle(n); });
-          g.append(t);
+          g.append(svg("g", { class: "toggle", transform: `translate(${tx},${G.nodeH / 2})` },
+            svg("circle", { r: 9 }), svg("text", { "text-anchor": "middle", y: 4 }, n.open ? "−" : "+")));
         }
-        g.addEventListener("click", () => {
-          if (moved) return;
-          if (n.item.type === "fn" && n.depth > 0) go(n.item.id, dir);
-          else toggle(n);
-        });
         g.addEventListener("mouseenter", () => {
-          for (const p of edgeLayer.querySelectorAll(".hot")) p.classList.remove("hot");
+          if (drag && drag.moved) return;
           markPath(n);
           if (n.depth === 1 && dir === "out") highlightLines(codeBox, n.item.lines, true);
         });
         g.addEventListener("mouseleave", () => {
+          if (drag && drag.moved) return;
           for (const p of svgEl.querySelectorAll(".hot")) p.classList.remove("hot");
           if (n.depth === 1 && dir === "out") highlightLines(codeBox, [], false);
         });
         n.g = g;
         nodeLayer.append(g);
       }
+      for (const { n } of positions.values()) placeNode(n);
     }
     function markPath(n) {
-      const keys = new Set();
-      for (let p = n; p; p = p.parent) { keys.add(p.key); p.g && p.g.classList.add("hot"); }
-      const paths = edgeLayer.querySelectorAll("path");
-      let i = 0;
-      for (const { n: m } of positions.values()) {
-        if (!m.parent) continue;
-        if (keys.has(m.key)) paths[i].classList.add("hot");
-        i++;
-      }
+      for (const p of svgEl.querySelectorAll(".hot")) p.classList.remove("hot");
+      for (let p = n; p; p = p.parent) { p.g && p.g.classList.add("hot"); p.edge && p.edge.classList.add("hot"); }
     }
 
     function rerender(anchor) {
-      const before = anchor && positions.get(anchor.key);
+      const before = anchor && pos(anchor);
       layout(); draw();
-      const after = anchor && positions.get(anchor.key);
+      const after = anchor && pos(anchor);
       if (before && after) { // keep the clicked node where it was on screen
         view.x += (before.x - after.x) * view.k; view.y += (before.y - after.y) * view.k; applyView();
       }
@@ -525,9 +548,14 @@
       const walk = (n) => { if (n.kids) n.kids.forEach((k) => { k.open = false; walk(k); }); };
       walk(root); root.open = root.expandable; layout(); draw(); fit();
     }
+    function tidy() {
+      const walk = (n) => { n.dx = n.dy = 0; if (n.kids) n.kids.forEach(walk); };
+      walk(root); layout(); draw(); fit();
+    }
     function bounds() {
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-      for (const { x, y, n } of positions.values()) {
+      for (const { n } of positions.values()) {
+        const { x, y } = pos(n);
         x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x + n.w); y1 = Math.max(y1, y + G.nodeH);
       }
       return { x0, y0, x1, y1 };
@@ -535,7 +563,7 @@
     function fit() {
       const b = bounds(), W = wrap.clientWidth || 600, H = wrap.clientHeight || 400, pad = 24;
       const k = Math.max(0.45, Math.min(1, (W - 2 * pad) / (b.x1 - b.x0), (H - 2 * pad) / (b.y1 - b.y0)));
-      const rootPos = positions.get(root.key);
+      const rootPos = pos(root);
       view.k = k;
       // horizontally: start at the root's side; vertically: centre, but keep the root in view
       view.x = dir === "out" ? pad - b.x0 * k : W - pad - b.x1 * k;
@@ -551,24 +579,51 @@
       applyView();
     }
 
-    // pan with drag, zoom with wheel / pinch
-    let drag = null, moved = false;
+    // Pointer handling. On a node: click expands/collapses, double-click opens the function,
+    // drag moves the node (with its subtree). On the background: drag pans.
+    // Clicks are detected on pointerup rather than with click/dblclick events because expanding
+    // a node redraws the graph, which would swallow the second click of a double-click.
+    let drag = null, lastTap = null;
     svgEl.addEventListener("pointerdown", (e) => {
-      if (e.button !== 0 || e.target.closest(".toggle")) return;
-      drag = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y, id: e.pointerId }; moved = false;
+      if (e.button !== 0) return;
+      const g = e.target.closest(".gnode");
+      const n = g ? g._node : null;
+      drag = { n, x: e.clientX, y: e.clientY, id: e.pointerId, moved: false,
+               vx: view.x, vy: view.y, dx: n ? n.dx || 0 : 0, dy: n ? n.dy || 0 : 0 };
     });
     svgEl.addEventListener("pointermove", (e) => {
       if (!drag) return;
       const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
-      if (!moved) {
+      if (!drag.moved) {
         if (Math.hypot(dx, dy) < 4) return;
-        moved = true; wrap.classList.add("panning"); svgEl.setPointerCapture(drag.id);
+        drag.moved = true; svgEl.setPointerCapture(drag.id);
+        wrap.classList.add(drag.n ? "dragging-node" : "panning");
+        if (drag.n) { markPath(drag.n); raise(drag.n); }
       }
-      view.x = drag.vx + dx; view.y = drag.vy + dy; applyView();
+      if (drag.n) {
+        drag.n.dx = drag.dx + dx / view.k; drag.n.dy = drag.dy + dy / view.k;
+        placeSubtree(drag.n);
+      } else {
+        view.x = drag.vx + dx; view.y = drag.vy + dy; applyView();
+      }
     });
-    const endDrag = () => { drag = null; wrap.classList.remove("panning"); setTimeout(() => (moved = false), 0); };
+    const endDrag = () => {
+      const d = drag;
+      drag = null;
+      wrap.classList.remove("panning", "dragging-node");
+      if (!d || d.moved || !d.n) return;
+      const n = d.n, now = performance.now();
+      const isDouble = lastTap && lastTap.key === n.key && now - lastTap.t < 400;
+      lastTap = isDouble ? null : { key: n.key, t: now };
+      if (isDouble) {
+        if (n.item.type === "fn" && n.depth > 0) go(n.item.id, dir);
+        else if (n.expandable && n.item.type === "fn") toggle(n); // root: undo the first click's toggle
+        return;
+      }
+      toggle(n);
+    };
     svgEl.addEventListener("pointerup", endDrag);
-    svgEl.addEventListener("pointercancel", endDrag);
+    svgEl.addEventListener("pointercancel", () => { drag = null; wrap.classList.remove("panning", "dragging-node"); });
     svgEl.addEventListener("wheel", (e) => { // wheel / pinch zooms around the cursor, shift+wheel scrolls sideways
       e.preventDefault();
       const r = svgEl.getBoundingClientRect();
@@ -777,7 +832,7 @@
         card(s.resolved, "linked to code here"), card(s.external, "external / library")),
       el("p", { class: "help" }, "Pick a function in the explorer or search with ", el("kbd", null, "/"),
         ". The graph shows the function as a node linked to every function it calls (switch to ", el("b", null, "Callers"),
-        " for the reverse). Expand nodes with +, click a node to jump to it, drag to pan, scroll to zoom, and use ", el("kbd", null, "Alt"), "+",
+        " for the reverse). Click a node to expand it, double-click it to open that function, drag nodes to move them, drag the background to pan, scroll to zoom, and use ", el("kbd", null, "Alt"), "+",
         el("kbd", null, "←"), " to go back. Calls in the source are links too. Links are resolved by name, so ",
         el("span", { style: "color:var(--warn)" }, "amber"), " marks a name with several candidates and dashed underlines mark best guesses."),
       entries.length ? el("h2", null, "Entry points (not called from anywhere, ranked by how much they reach)") : null,

@@ -211,3 +211,4 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height:
 @media (max-width: 760px) {
   .panel.tree-panel.is-graph { width: auto; height: 55%; max-height: none; flex: none; }
 }
+.graph-wrap.dragging-node, .graph-wrap.dragging-node .gnode { cursor: grabbing; }
