@@ -33,7 +33,7 @@
 
   const prefs = loadPrefs();
   function loadPrefs() {
-    const d = { ext: false, low: true, theme: null, sidebar: null, treeW: null, view: "graph" };
+    const d = { ext: false, low: true, theme: null, sidebar: null, treeW: null, view: "graph", legend: false };
     try { return Object.assign(d, JSON.parse(localStorage.getItem("codeviz-prefs") || "{}")); } catch { return d; }
   }
   function savePrefs() { try { localStorage.setItem("codeviz-prefs", JSON.stringify(prefs)); } catch { /* ignore */ } }
@@ -438,13 +438,13 @@
   function textWidth(text, font) { measureCtx.font = font; return measureCtx.measureText(text).width; }
   const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
-  const G = { nodeH: 42, rowGap: 14, colGap: 70, maxLabel: 46, font: "", metaFont: "" };
+  const G = { nodeH: 42, rowGap: 14, colGap: 70, maxLabel: 46, font: "", metaFont: "", sans: "" };
 
   function buildCallGraph(rootFn, dir, container, codeBox, showSource) {
     container.textContent = "";
     const mono = getComputedStyle(document.documentElement).getPropertyValue("--mono").trim();
     const sans = getComputedStyle(document.documentElement).getPropertyValue("--sans").trim();
-    G.font = "600 12px " + mono; G.metaFont = "11px " + sans;
+    G.font = "600 12px " + mono; G.metaFont = "11px " + sans; G.sans = sans;
 
     // graph nodes are created lazily as branches are expanded
     const makeNode = (item, parent) => {
@@ -470,17 +470,23 @@
         n.meta = "external";
         n.kind = "ext";
       }
+      if (n.expandable && item.type === "fn" && !childItems(n).length) n.expandable = false;
       n.label = clip(n.label, G.maxLabel);
-      n.w = Math.max(textWidth(n.label, G.font) + 34, textWidth(n.meta, G.metaFont) + 34, 90) + (n.expandable ? 16 : 0);
+      n.metaText = n.cycle ? "↻ recursive · " + n.meta : item.low ? "guess · " + n.meta : n.meta;
+      n.w = Math.max(textWidth(n.label, G.font) + 34, textWidth(n.metaText, G.metaFont) + 34, 90) + (n.expandable ? 20 : 0);
       return n;
     };
-    const children = (n) => {
-      if (!n.kids) {
+    // what a node would expand to (cheap: no graph nodes are made until it is actually opened)
+    const childItems = (n) => {
+      if (!n.items) {
         const it = n.item;
-        const list = it.type === "fn" ? (dir === "out" ? outgoing(FUNCS[it.id]) : incoming(FUNCS[it.id]))
+        n.items = it.type === "fn" ? (dir === "out" ? outgoing(FUNCS[it.id]) : incoming(FUNCS[it.id]))
           : it.type === "amb" ? it.targets.map((id) => ({ type: "fn", id, lines: [] })) : [];
-        n.kids = list.map((k) => makeNode(k, n));
       }
+      return n.items;
+    };
+    const children = (n) => {
+      if (!n.kids) n.kids = childItems(n).map((k) => makeNode(k, n));
       return n.kids;
     };
     const root = makeNode({ type: "fn", id: rootFn.id, lines: [] }, null);
@@ -504,8 +510,13 @@
       el("button", { title: "Fit to view", onclick: () => fit() }, "Fit"),
       el("button", { title: "Expand one more level", onclick: () => expandLevel() }, "Expand"),
       el("button", { title: "Collapse to the first level", onclick: () => collapseAll() }, "Collapse"),
-      el("button", { title: "Put dragged nodes back in their places", onclick: () => tidy() }, "Tidy"));
-    wrap.append(svgEl, tools);
+      el("button", { title: "Put dragged nodes back in their places", onclick: () => tidy() }, "Tidy"),
+      el("button", { title: "What the colours and lines mean", class: prefs.legend ? "on" : null, onclick: (e) => {
+        prefs.legend = !prefs.legend; savePrefs(); legend.hidden = !prefs.legend; e.currentTarget.classList.toggle("on", prefs.legend);
+      } }, "?"));
+    const legend = graphLegend();
+    legend.hidden = !prefs.legend;
+    wrap.append(svgEl, tools, legend);
     container.append(wrap);
     let view = { x: 0, y: 0, k: 1 };
     const applyView = () => viewport.setAttribute("transform", `translate(${view.x},${view.y}) scale(${view.k})`);
@@ -589,17 +600,21 @@
         const tx0 = dir === "in" && n.expandable ? 14 : 0; // leave room for the left-side toggle
         g.append(svg("rect", { class: "stripe", width: 4, height: G.nodeH - 10, x: tx0, y: 5, rx: 2 }));
         g.append(svg("text", { class: "glabel", x: tx0 + 12, y: 17 }, n.label));
-        g.append(svg("text", { class: "gmeta", x: tx0 + 12, y: 33 }, n.cycle ? "↻ recursive · " + n.meta : n.item.low ? "guess · " + n.meta : n.meta));
+        g.append(svg("text", { class: "gmeta", x: tx0 + 12, y: 33 }, n.metaText));
         const isFn = n.item.type === "fn";
         const how = [n.kind === "ext" ? null : "click to see its code", isFn && n.depth ? "double-click to open" : null,
-                     n.expandable ? "+ to " + (n.open ? "collapse" : "expand") : null, "drag to move"].filter(Boolean).join(" · ");
+                     n.expandable ? (n.open ? "− to collapse" : "+ to expand (shift: 3 levels)") : null, "drag to move"].filter(Boolean).join(" · ");
         g.setAttribute("data-hc", isFn ? String(n.item.id) : n.kind === "amb" ? "a:" + n.item.targets.join(",")
           : "x:" + n.label.replace(/\(\)$/, ""));
         g.setAttribute("data-hc-hint", how[0].toUpperCase() + how.slice(1));
         if (n.expandable) {
           const tx = dir === "out" ? n.w - 2 : 2;
-          g.append(svg("g", { class: "toggle", transform: `translate(${tx},${G.nodeH / 2})` },
-            svg("circle", { r: 9 }), svg("text", { "text-anchor": "middle", y: 4 }, n.open ? "−" : "+")));
+          // collapsed: a pill saying how many calls are hidden behind the node; open: a "−" circle
+          const label = n.open ? "−" : "+" + childItems(n).length;
+          const pw = n.open ? 18 : Math.max(18, textWidth(label, "700 11px " + G.sans) + 10);
+          g.append(svg("g", { class: "toggle" + (n.open ? "" : " closed"), transform: `translate(${tx},${G.nodeH / 2})` },
+            svg("rect", { x: -pw / 2, y: -9, width: pw, height: 18, rx: 9 }),
+            svg("text", { "text-anchor": "middle", y: n.open ? 4.5 : 4 }, label)));
         }
         g.addEventListener("mouseenter", () => {
           if (drag && drag.moved) return;
@@ -630,6 +645,23 @@
       }
     }
     function toggle(n) { if (!n.expandable) return; n.open = !n.open; rerender(n); }
+    function expandDeep(n, levels) {
+      const MAX_NODES = 400; // stop before a fan-out explosion makes the graph unreadable
+      let count = positions.size, frontier = [n];
+      for (let d = 0; d < levels && frontier.length; d++) {
+        const next = [];
+        for (const m of frontier) {
+          if (!m.expandable || m.cycle) continue;
+          if (!m.open) {
+            if (count + childItems(m).length > MAX_NODES) { frontier = []; break; }
+            m.open = true; count += childItems(m).length;
+          }
+          next.push(...children(m));
+        }
+        if (frontier.length) frontier = next;
+      }
+      rerender(n);
+    }
     function expandLevel() {
       let frontier = [root];
       while (frontier.length) { // find the shallowest collapsed level and open it
@@ -683,7 +715,7 @@
       if (e.button !== 0) return;
       const g = e.target.closest(".gnode");
       const n = g ? g._node : null;
-      drag = { n, onToggle: !!e.target.closest(".toggle"), x: e.clientX, y: e.clientY, id: e.pointerId, moved: false,
+      drag = { n, onToggle: !!e.target.closest(".toggle"), shift: e.shiftKey, x: e.clientX, y: e.clientY, id: e.pointerId, moved: false,
                vx: view.x, vy: view.y, dx: n ? n.dx || 0 : 0, dy: n ? n.dy || 0 : 0 };
     });
     svgEl.addEventListener("pointermove", (e) => {
@@ -708,7 +740,7 @@
       wrap.classList.remove("panning", "dragging-node");
       if (!d || d.moved || !d.n) return;
       const n = d.n;
-      if (d.onToggle) { lastTap = null; toggle(n); return; }
+      if (d.onToggle) { lastTap = null; if (d.shift && !n.open) expandDeep(n, 3); else toggle(n); return; }
       const now = performance.now();
       const isDouble = lastTap && lastTap.key === n.key && now - lastTap.t < 400;
       lastTap = isDouble ? null : { key: n.key, t: now };
@@ -742,6 +774,23 @@
     if (!root.expandable) container.append(el("div", { class: "empty-note graph-empty" },
       dir === "out" ? (rootFn.calls.length ? "Calls only external functions. Tick “external” to show them." : "This function doesn’t call anything.")
                     : "No callers found in this codebase. It may be an entry point, a callback, or called dynamically."));
+  }
+
+
+  function graphLegend() {
+    const line = (cls) => svg("svg", { width: 34, height: 10 }, svg("path", { class: "edge " + cls, d: "M1,5 L33,5" }));
+    const stripe = (cls) => el("span", { class: "lg-stripe " + cls });
+    const row = (sample, text) => el("li", null, el("span", { class: "lg-sample" }, sample), text);
+    return el("div", { class: "graph-legend" },
+      el("div", { class: "lg-title" }, "Legend"),
+      el("ul", null,
+        row(stripe("function"), "function"), row(stripe("method"), "method"), row(stripe("constructor"), "constructor"),
+        row(stripe("toplevel"), "top-level code of a file"),
+        row(line(""), "call, resolved with confidence"), row(line("low"), "best guess (matched by name only)"),
+        row(line("amb"), "several functions share the name"), row(line("ext"), "external (not in this codebase)"),
+        row(el("span", { class: "lg-pill" }, "+5"), "5 more calls hidden: click to expand"),
+        row(el("span", { class: "lg-text" }, "×3"), "called 3 times from the same function"),
+        row(el("span", { class: "lg-text" }, "↻"), "recursion: already shown above in this branch")));
   }
 
   // ---------------------------------------------------------------- explorer

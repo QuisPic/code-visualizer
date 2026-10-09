@@ -204,9 +204,10 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height:
 .glabel { font: 600 12px var(--mono); fill: var(--fg); }
 .gmeta { font: 11px var(--sans); fill: var(--muted); }
 .toggle { cursor: pointer; }
-.toggle circle { fill: var(--bg); stroke: var(--accent); stroke-width: 1.4; }
+.toggle rect { fill: var(--bg); stroke: var(--accent); stroke-width: 1.4; }
 .toggle text { font: 700 13px var(--sans); fill: var(--accent); }
-.toggle:hover circle { fill: var(--accent); }
+.toggle.closed text { font-size: 11px; }
+.toggle:hover rect { fill: var(--accent); }
 .toggle:hover text { fill: var(--bg); }
 @media (max-width: 760px) {
   .panel.tree-panel.is-graph { width: auto; height: 55%; max-height: none; flex: none; }
@@ -237,3 +238,16 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height:
 .hc-list { list-style: none; margin: 0; padding: 0; font: 12px/1.6 var(--mono); }
 .hc-list .muted { font: 11px var(--sans); }
 .hc-hint { color: var(--muted); font-size: 11px; border-top: 1px solid var(--border); padding-top: 5px; }
+/* graph legend */
+.graph-tools button.on { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
+.graph-legend { position: absolute; left: 10px; bottom: 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 1px 6px rgba(0,0,0,.12); padding: 7px 10px 6px; font-size: 11px; color: var(--muted); max-width: calc(100% - 20px); }
+.graph-legend .lg-title { font-weight: 600; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 3px; }
+.graph-legend ul { list-style: none; margin: 0; padding: 0; }
+.graph-legend li { display: flex; align-items: center; gap: 8px; line-height: 18px; }
+.lg-sample { width: 34px; flex: none; display: flex; justify-content: center; align-items: center; }
+.lg-sample svg { display: block; overflow: visible; }
+.lg-stripe { width: 4px; height: 13px; border-radius: 2px; background: var(--k-fn); }
+.lg-stripe.method { background: var(--k-method); } .lg-stripe.constructor { background: var(--k-ctor); } .lg-stripe.toplevel { background: var(--k-top); }
+.lg-pill { font: 700 10px/14px var(--sans); color: var(--accent); border: 1.4px solid var(--accent); border-radius: 8px; padding: 0 5px; }
+.lg-text { font: 11px var(--sans); color: var(--fg); }
