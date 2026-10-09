@@ -318,6 +318,15 @@ class Resolver:
 
     def resolve(self, caller: Function, call: Call) -> tuple[list[int], str]:
         """Return (target function ids, confidence) where confidence is high | low | ambiguous."""
+        if call.ref:
+            # a name passed as an argument is usually a variable: only link it when it is surely a function
+            if call.name in caller.locals or (call.qualifier is None and call.name in self.ctors):
+                return [], "none"
+            targets, conf = self.resolve(caller, Call(call.name, call.qualifier, call.sep, call.line, call.col))
+            # a bare name refers to a free function; `self.f` / `this.f` to a method
+            if conf != "high" or any(bool(self.functions[t].scope) != bool(call.qualifier) for t in targets):
+                return [], "none"
+            return targets, conf
         # a typed receiver changes the answer, so swap it in before the cache lookup
         if call.qualifier and call.sep in (".", "->"):
             typ = self._receiver_type(caller, call.qualifier)

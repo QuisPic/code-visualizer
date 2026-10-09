@@ -43,6 +43,7 @@ class Call:
     line: int  # 1-based
     col: int  # 0-based character column of the name
     ctor: bool = False  # `new Foo()` style call
+    ref: bool = False  # a function passed by name as an argument (a callback), not called here
 
 
 @dataclass
@@ -61,6 +62,7 @@ class Function:
     complexity: int = 1  # cyclomatic: 1 + branches, loops, cases, catches and && / ||
     var_types: dict[str, str] = field(default_factory=dict)  # local/parameter name -> declared class name
     returns: str | None = None  # declared return type's class name, e.g. `-> Foo`, `Foo* get()`
+    locals: set[str] = field(default_factory=set)  # variable names in the file (they shadow functions)
 
 
 @dataclass
@@ -164,6 +166,28 @@ def _base_names(node: Node) -> list[str]:
     return out
 
 
+# Nodes whose identifiers are parameters, and the binding field of nodes that assign a name.
+_PARAM_LISTS = {"parameters", "formal_parameters", "parameter_list", "lambda_parameters"}
+_BINDING_FIELDS = {
+    "assignment": "left", "augmented_assignment": "left", "assignment_expression": "left",
+    "variable_declarator": "name", "init_declarator": "declarator", "short_var_declaration": "left",
+    "let_declaration": "pattern", "for_statement": "left", "for_in_statement": "left", "for_in_clause": "left",
+    "declaration": "declarator", "var_spec": "name", "as_pattern_target": None, "with_item": None,
+}
+_NAME_NODES = {"identifier", "shorthand_property_identifier_pattern", "variable_name"}
+
+
+def _identifiers(node: Node) -> list[str]:
+    stack, out = [node], []
+    while stack:
+        n = stack.pop()
+        if n.type in _NAME_NODES:
+            out.append(n.text.decode("utf-8", "replace").lstrip("$"))
+        elif n.type not in ("call", "call_expression", "lambda", "arrow_function", "function_expression"):
+            stack.extend(n.named_children)
+    return out
+
+
 def _text(node: Node | None) -> str:
     return node.text.decode("utf-8", "replace") if node is not None else ""
 
@@ -218,6 +242,7 @@ class _Extractor:
         self.toplevel: Function | None = None
         self.field_types: dict[str, dict[str, str]] = {}
         self.bases: dict[str, list[str]] = {}
+        self.assigned: set[str] = set()  # every parameter / assigned name in the file
 
     # ---- helpers -------------------------------------------------------------------------
     def _col(self, node: Node) -> int:
@@ -521,6 +546,29 @@ class _Extractor:
             prev = fields.get(name)
             fields[name] = typ if prev in (None, typ) else ""
 
+    def _refs(self, call_node: Node) -> list[Call]:
+        """Functions passed by name as arguments: `on("x", handler)`, `Thread(target=run)`, `map(this.fmt)`."""
+        args = call_node.child_by_field_name("arguments")
+        if args is None or self.lang.name == "ruby":  # a bare Ruby identifier is already a call
+            return []
+        out = []
+        for arg in args.named_children:
+            if arg.type in ("keyword_argument", "pair", "argument", "named_argument"):
+                arg = arg.child_by_field_name("value") or (arg.named_children[-1] if arg.named_children else None)
+            if arg is not None and arg.type == "pointer_expression":  # C: &handler
+                arg = arg.child_by_field_name("argument")
+            if arg is None:
+                continue
+            if arg.type == "identifier":
+                out.append(Call(_text(arg), None, None, arg.start_point[0] + 1, self._col(arg), ref=True))
+            elif arg.type in ("member_expression", "attribute", "field_expression"):
+                obj = arg.child_by_field_name("object") or arg.child_by_field_name("argument")
+                prop = (arg.child_by_field_name("property") or arg.child_by_field_name("attribute")
+                        or arg.child_by_field_name("field"))
+                if obj is not None and prop is not None and _text(obj) in self.lang.self_names | {"this"}:
+                    out.append(Call(_text(prop), _text(obj), ".", prop.start_point[0] + 1, self._col(prop), ref=True))
+        return out
+
     # ---- traversal -----------------------------------------------------------------------
     def _new_function(self, node: Node, parts: list[str], scope: list[str], in_class: bool) -> Function:
         full_scope = scope + parts[:-1]
@@ -595,6 +643,7 @@ class _Extractor:
                 if call is not None:
                     owner = func or self._toplevel()
                     owner.calls.append(call)
+                    owner.calls.extend(self._refs(node))
             elif func is not None:
                 if t in _BRANCHES:
                     if not (t in ("case_statement", "switch_label", "switch_entry", "when_entry", "match_arm")
@@ -604,6 +653,13 @@ class _Extractor:
                     func.complexity += 1
             if t in _DECLS:
                 self._record_types(node, scope, func, in_class)
+            if t in _PARAM_LISTS:
+                self.assigned.update(_identifiers(node))
+            elif t in _BINDING_FIELDS:
+                target = node.child_by_field_name(_BINDING_FIELDS[t]) if _BINDING_FIELDS[t] else node
+                value = node.child_by_field_name("value") or node.child_by_field_name("right")
+                if target is not None and not (value is not None and value.type in lang.functions):
+                    self.assigned.update(_identifiers(target))  # `const f = () => ...` defines a function
 
             for child in reversed(node.children):
                 if child.is_named:
@@ -724,6 +780,9 @@ def extract_file(lang: Language, parser, rel_path: str, source: bytes) -> FileIn
     ex = _Extractor(lang, rel_path, source)
     ex.run(tree.root_node)
     functions = ex.functions
+    # a name that is a variable or parameter anywhere in this file isn't trusted as a callback
+    for f in functions + ([ex.toplevel] if ex.toplevel is not None else []):
+        f.locals = ex.assigned
     if ex.toplevel is not None:
         ex.toplevel.code = ""  # top-level code is shown via its call list only
         functions = [ex.toplevel] + functions

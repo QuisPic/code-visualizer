@@ -220,6 +220,8 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height:
 .edge { fill: none; stroke: var(--muted); stroke-opacity: .55; stroke-width: 1.4; }
 .edge.low { stroke-dasharray: 5 4; }
 .edge.amb { stroke: var(--warn); }
+.edge.ref { stroke-dasharray: 1 3; stroke-linecap: round; stroke-width: 1.8; }
+.badge.ref { background: none; border: 1px dotted var(--muted); }
 .edge.ext { stroke: var(--ext); stroke-dasharray: 2 3; }
 .edge.hot { stroke: var(--accent); stroke-opacity: 1; stroke-width: 2.2; }
 .edge-label { font: 10px var(--sans); fill: var(--muted); }

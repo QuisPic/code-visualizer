@@ -241,3 +241,11 @@ def test_churn(tmp_path):
     assert {f["p"]: f.get("cc") for f in data["files"]} == {"a.py": 2, "b.py": 1}
     assert data["churn"] == {"since": "1 year", "commits": 2}
     assert "churn" not in build(tmp_path, "t", [], quiet=True)
+
+
+def test_callbacks(graph):
+    data, find, targets = graph
+    refs = lambda f: {c["n"]: targets(f, c["n"]) for c in f["calls"] if c.get("r")}
+    assert refs(find("schedule")) == {"onTick": ["onTick"]}  # `finished` is a local variable there
+    assert refs(find("spawn")) == {"crunch": ["crunch"]}
+    assert [c["n"] for c in find("onTick")["calls"]] == []
