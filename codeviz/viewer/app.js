@@ -985,6 +985,77 @@
     explorer.textContent = ""; explorerNodes.clear(); renderDir(explorer, dirTree, "");
   });
 
+
+  // ---------------------------------------------------------------- bookmarks and recent trail
+  // Stored per project as "file|qualified name|line" keys, so they survive regenerating the page
+  // (function ids change between runs; the line is only a tie-breaker for overloads).
+  const PINS_KEY = "codeviz-pins:" + DATA.name;
+  const fnKey = (f) => fileOf(f) + "|" + qname(f) + "|" + f.l;
+  const keyIndex = new Map();
+  for (const f of FUNCS) {
+    const k = fnKey(f), loose = k.slice(0, k.lastIndexOf("|"));
+    keyIndex.set(k, f.id);
+    if (!keyIndex.has(loose)) keyIndex.set(loose, f.id);
+  }
+  const fromKey = (k) => keyIndex.get(k) ?? keyIndex.get(k.slice(0, k.lastIndexOf("|")));
+  const pins = (() => {
+    try { const v = JSON.parse(localStorage.getItem(PINS_KEY) || "{}"); return { marks: v.marks || [], recent: v.recent || [] }; }
+    catch { return { marks: [], recent: [] }; }
+  })();
+  const savePins = () => { try { localStorage.setItem(PINS_KEY, JSON.stringify(pins)); } catch { /* ignore */ } };
+  const isMarked = (id) => pins.marks.includes(fnKey(FUNCS[id]));
+  function toggleMark(id) {
+    const k = fnKey(FUNCS[id]);
+    pins.marks = isMarked(id) ? pins.marks.filter((m) => m !== k) : [...pins.marks, k];
+    savePins(); renderPins();
+    for (const b of document.querySelectorAll(".star[data-fn='" + id + "']")) setStar(b, id);
+  }
+  function setStar(btn, id) {
+    const on = isMarked(id);
+    btn.classList.toggle("on", on);
+    btn.textContent = on ? "★" : "☆";
+    btn.title = (on ? "Remove bookmark" : "Bookmark this function") + " (B)";
+  }
+  function starButton(id) {
+    const b = el("button", { class: "star link-btn", "data-fn": id, onclick: () => toggleMark(id) });
+    setStar(b, id);
+    return b;
+  }
+  function visit(id) {
+    const k = fnKey(FUNCS[id]);
+    pins.recent = [k, ...pins.recent.filter((r) => r !== k)].slice(0, 12);
+    savePins(); renderPins(id);
+  }
+  const pinsBox = $("#pins");
+  let pinsOpen = { marks: true, recent: true };
+  function renderPins(current) {
+    pinsBox.textContent = "";
+    const section = (key, title, keys, action) => {
+      const ids = keys.map(fromKey).filter((id) => id != null);
+      if (!ids.length) return;
+      const ul = el("ul", { class: "tree pin-list" });
+      ul.hidden = !pinsOpen[key];
+      for (const id of ids) {
+        const f = FUNCS[id];
+        const row = el("div", { class: "row" + (id === current ? " selected" : ""), "data-hc": id, onclick: () => go(id) },
+          el("span", { class: "icon " + f.k }, KIND_LETTER[f.k]), fnLabel(f, false),
+          el("span", { class: "meta" }, fileOf(f).split("/").pop()),
+          action ? el("button", { class: "link-btn pin-x", title: action.title, onclick: (e) => { e.stopPropagation(); action.run(id); } }, "×") : null);
+        ul.append(el("li", null, row));
+      }
+      const caret = el("span", { class: "caret" + (pinsOpen[key] ? " open" : "") }, "▸");
+      const head = el("div", { class: "pane-title pin-head" }, el("span", null, caret, " " + title + " ", el("span", { class: "badge" }, String(ids.length))),
+        key === "recent" ? el("button", { class: "link-btn", title: "Forget recently visited functions", onclick: (e) => {
+          e.stopPropagation(); pins.recent = []; savePins(); renderPins(current);
+        } }, "clear") : null);
+      head.addEventListener("click", () => { pinsOpen[key] = !pinsOpen[key]; ul.hidden = !pinsOpen[key]; caret.classList.toggle("open", pinsOpen[key]); });
+      pinsBox.append(head, ul);
+    };
+    section("marks", "Bookmarks", pins.marks, { title: "Remove bookmark", run: (id) => toggleMark(id) });
+    section("recent", "Recent", pins.recent, null);
+  }
+  renderPins();
+
   // ---------------------------------------------------------------- views
   const main = $("#main");
   function showFunction(id, dir) {
@@ -995,7 +1066,7 @@
     const nCallees = new Set(f.calls.flatMap((c) => c.t || [])).size;
     const nExt = f.calls.filter((c) => !c.t).length;
     main.append(el("div", { class: "fn-header" },
-      el("div", { class: "fn-title" }, el("span", { class: "icon " + f.k }, KIND_LETTER[f.k]), fnLabel(f)),
+      el("div", { class: "fn-title" }, el("span", { class: "icon " + f.k }, KIND_LETTER[f.k]), fnLabel(f), starButton(id)),
       el("div", { class: "fn-sub" },
         el("span", { class: "mono" }, fileOf(f) + ":" + f.l + (f.e > f.l ? "–" + f.e : "")),
         el("span", null, f.k),
@@ -1072,6 +1143,7 @@
     });
     renderTree();
     revealInExplorer(f);
+    visit(id);
   }
 
   function cycleSection() {
@@ -1540,6 +1612,9 @@
   document.addEventListener("keydown", (e) => {
     if (e.key === "/" && document.activeElement !== search) { e.preventDefault(); search.focus(); search.select(); }
     if (e.key === "Escape") hidePopup();
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
+    const m = /^#\/f\/(\d+)/.exec(location.hash);
+    if (!typing && m && (e.key === "b" || e.key === "B") && !e.ctrlKey && !e.metaKey && !e.altKey) toggleMark(+m[1]);
   });
 
   // ---------------------------------------------------------------- chrome
