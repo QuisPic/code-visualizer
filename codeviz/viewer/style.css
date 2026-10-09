@@ -167,3 +167,47 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height:
   .panel.tree-panel { width: auto; max-height: 45%; }
   .stats-text { display: none; }
 }
+
+/* call graph */
+.panel.tree-panel.is-graph { width: 62%; }
+.graph-box { flex: 1; position: relative; min-height: 0; overflow: hidden; }
+.graph-wrap { position: absolute; inset: 0; background-image: radial-gradient(var(--border) 1px, transparent 1px); background-size: 18px 18px; }
+.graph-wrap.panning { cursor: grabbing; }
+.graph { width: 100%; height: 100%; display: block; cursor: grab; user-select: none; touch-action: none; }
+.graph-tools { position: absolute; right: 10px; bottom: 10px; display: flex; gap: 4px; }
+.graph-tools button { background: var(--bg); box-shadow: 0 1px 4px rgba(0,0,0,.1); min-width: 30px; }
+.graph-empty { position: absolute; left: 0; right: 0; bottom: 48px; text-align: center; }
+.tabs.seg { background: var(--bg-3); border-radius: 6px; padding: 1px; }
+.tabs.seg .tab.active { background: var(--bg); color: var(--fg); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+.edge { fill: none; stroke: var(--muted); stroke-opacity: .55; stroke-width: 1.4; }
+.edge.low { stroke-dasharray: 5 4; }
+.edge.amb { stroke: var(--warn); }
+.edge.ext { stroke: var(--ext); stroke-dasharray: 2 3; }
+.edge.hot { stroke: var(--accent); stroke-opacity: 1; stroke-width: 2.2; }
+.edge-label { font: 10px var(--sans); fill: var(--muted); }
+.gnode { cursor: pointer; }
+.gnode .box { fill: var(--bg); stroke: var(--border); stroke-width: 1.2; }
+.gnode:hover .box, .gnode.hot .box { stroke: var(--accent); stroke-width: 1.8; }
+.gnode.root .box { fill: var(--accent-bg); stroke: var(--accent); stroke-width: 2; }
+.gnode .stripe { fill: var(--k-fn); }
+.gnode.k-method .stripe { fill: var(--k-method); }
+.gnode.k-constructor .stripe { fill: var(--k-ctor); }
+.gnode.k-toplevel .stripe { fill: var(--k-top); }
+.gnode.k-amb .stripe { fill: var(--warn); }
+.gnode.k-amb .box { stroke: var(--warn); stroke-dasharray: 4 3; }
+.gnode.k-ext { cursor: default; }
+.gnode.k-ext .stripe { fill: var(--ext); }
+.gnode.k-ext .box { fill: var(--bg-2); stroke-dasharray: 3 3; }
+.gnode.k-ext .glabel { fill: var(--ext); }
+.gnode.low .box { stroke-dasharray: 5 3; }
+.gnode.cycle .box { fill: var(--bg-2); }
+.glabel { font: 600 12px var(--mono); fill: var(--fg); }
+.gmeta { font: 11px var(--sans); fill: var(--muted); }
+.toggle { cursor: pointer; }
+.toggle circle { fill: var(--bg); stroke: var(--accent); stroke-width: 1.4; }
+.toggle text { font: 700 13px var(--sans); fill: var(--accent); }
+.toggle:hover circle { fill: var(--accent); }
+.toggle:hover text { fill: var(--bg); }
+@media (max-width: 760px) {
+  .panel.tree-panel.is-graph { width: auto; height: 55%; max-height: none; flex: none; }
+}

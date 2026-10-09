@@ -33,7 +33,7 @@
 
   const prefs = loadPrefs();
   function loadPrefs() {
-    const d = { ext: false, low: true, theme: null, sidebar: null, treeW: null };
+    const d = { ext: false, low: true, theme: null, sidebar: null, treeW: null, view: "graph" };
     try { return Object.assign(d, JSON.parse(localStorage.getItem("codeviz-prefs") || "{}")); } catch { return d; }
   }
   function savePrefs() { try { localStorage.setItem("codeviz-prefs", JSON.stringify(prefs)); } catch { /* ignore */ } }
@@ -331,6 +331,259 @@
     return node;
   }
 
+  // ---------------------------------------------------------------- call graph (node-link view)
+  const SVGNS = "http://www.w3.org/2000/svg";
+  function svg(tag, attrs, ...children) {
+    const node = document.createElementNS(SVGNS, tag);
+    if (attrs) for (const [k, v] of Object.entries(attrs)) if (v != null) node.setAttribute(k, v);
+    for (const c of children) if (c != null) node.append(c);
+    return node;
+  }
+  const measureCtx = document.createElement("canvas").getContext("2d");
+  function textWidth(text, font) { measureCtx.font = font; return measureCtx.measureText(text).width; }
+  const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
+
+  const G = { nodeH: 42, rowGap: 14, colGap: 70, maxLabel: 46, font: "", metaFont: "" };
+
+  function buildCallGraph(rootFn, dir, container, codeBox) {
+    container.textContent = "";
+    const mono = getComputedStyle(document.documentElement).getPropertyValue("--mono").trim();
+    const sans = getComputedStyle(document.documentElement).getPropertyValue("--sans").trim();
+    G.font = "600 12px " + mono; G.metaFont = "11px " + sans;
+
+    // graph nodes are created lazily as branches are expanded
+    const makeNode = (item, parent) => {
+      const n = { item, parent, depth: parent ? parent.depth + 1 : 0, kids: null, open: false,
+                  key: (parent ? parent.key + ">" : "") + (item.type === "fn" ? item.id : item.type + ":" + item.name) };
+      const anc = new Set();
+      for (let p = parent; p; p = p.parent) if (p.item.type === "fn") anc.add(p.item.id);
+      n.cycle = item.type === "fn" && anc.has(item.id);
+      if (item.type === "fn") {
+        const f = FUNCS[item.id];
+        n.expandable = !n.cycle && (dir === "out" ? f.calls.some((c) => c.t) : callers[f.id].length > 0);
+        n.label = (f.s ? f.s + sep(f) : "") + (f.k === "toplevel" ? f.n : f.n + "()");
+        n.meta = fileOf(f).split("/").pop() + ":" + f.l;
+        n.kind = f.k;
+      } else if (item.type === "amb") {
+        n.expandable = true;
+        n.label = item.name + "()";
+        n.meta = item.targets.length + " candidates";
+        n.kind = "amb";
+      } else {
+        n.expandable = false;
+        n.label = (item.q ? item.q + (item.q.includes("::") ? "::" : ".") : "") + item.name + "()";
+        n.meta = "external";
+        n.kind = "ext";
+      }
+      n.label = clip(n.label, G.maxLabel);
+      n.w = Math.max(textWidth(n.label, G.font) + 34, textWidth(n.meta, G.metaFont) + 34, 90) + (n.expandable ? 16 : 0);
+      return n;
+    };
+    const children = (n) => {
+      if (!n.kids) {
+        const it = n.item;
+        const list = it.type === "fn" ? (dir === "out" ? outgoing(FUNCS[it.id]) : incoming(FUNCS[it.id]))
+          : it.type === "amb" ? it.targets.map((id) => ({ type: "fn", id, lines: [] })) : [];
+        n.kids = list.map((k) => makeNode(k, n));
+      }
+      return n.kids;
+    };
+    const root = makeNode({ type: "fn", id: rootFn.id, lines: [] }, null);
+    root.open = root.expandable;
+    if (root.open) {
+      const kids = children(root);
+      if (kids.length <= 6) for (const k of kids) if (k.expandable && !k.cycle) k.open = true;
+    }
+
+    // ---- view: svg with pan/zoom
+    const wrap = el("div", { class: "graph-wrap" });
+    const svgEl = svg("svg", { class: "graph" });
+    const viewport = svg("g");
+    const edgeLayer = svg("g", { class: "edges" });
+    const nodeLayer = svg("g", { class: "nodes" });
+    viewport.append(edgeLayer, nodeLayer);
+    svgEl.append(viewport);
+    const tools = el("div", { class: "graph-tools" },
+      el("button", { title: "Zoom in", onclick: () => zoomBy(1.25) }, "+"),
+      el("button", { title: "Zoom out", onclick: () => zoomBy(0.8) }, "−"),
+      el("button", { title: "Fit to view", onclick: () => fit() }, "Fit"),
+      el("button", { title: "Expand one more level", onclick: () => expandLevel() }, "Expand"),
+      el("button", { title: "Collapse to the first level", onclick: () => collapseAll() }, "Collapse"));
+    wrap.append(svgEl, tools);
+    container.append(wrap);
+    let view = { x: 0, y: 0, k: 1 };
+    const applyView = () => viewport.setAttribute("transform", `translate(${view.x},${view.y}) scale(${view.k})`);
+
+    let positions = new Map(); // key -> {x, y, n}
+    function layout() {
+      // column widths per depth, rows by leaf count (tidy tree)
+      const colW = [];
+      const visit = (n) => {
+        colW[n.depth] = Math.max(colW[n.depth] || 0, n.w);
+        if (n.open) for (const k of children(n)) visit(k);
+      };
+      visit(root);
+      const colX = [0];
+      for (let d = 1; d < colW.length; d++) colX[d] = colX[d - 1] + colW[d - 1] + G.colGap;
+      positions = new Map();
+      let row = 0;
+      const place = (n) => {
+        let y;
+        const kids = n.open ? children(n) : [];
+        if (!kids.length) { y = row * (G.nodeH + G.rowGap); row++; }
+        else { const ys = kids.map(place); y = (ys[0] + ys[ys.length - 1]) / 2; }
+        // callers grow to the left: mirror x and right-align nodes in their column
+        const x = dir === "out" ? colX[n.depth] : -colX[n.depth] - n.w;
+        positions.set(n.key, { x, y, n });
+        return y;
+      };
+      place(root);
+    }
+
+    function draw() {
+      edgeLayer.textContent = ""; nodeLayer.textContent = "";
+      for (const { x, y, n } of positions.values()) {
+        if (!n.parent) continue;
+        const pp = positions.get(n.parent.key);
+        const cy = y + G.nodeH / 2, py = pp.y + G.nodeH / 2;
+        const x1 = dir === "out" ? pp.x + pp.n.w : pp.x, x2 = dir === "out" ? x : x + n.w;
+        const mx = (x1 + x2) / 2;
+        const cls = "edge" + (n.kind === "ext" ? " ext" : "") + (n.item.low ? " low" : "") + (n.kind === "amb" ? " amb" : "");
+        edgeLayer.append(svg("path", { class: cls, d: `M${x1},${py} C${mx},${py} ${mx},${cy} ${x2},${cy}` }));
+        if (n.item.lines && n.item.lines.length > 1) {
+          edgeLayer.append(svg("text", { class: "edge-label", x: x2 + (dir === "out" ? -6 : 6), y: cy - 5,
+            "text-anchor": dir === "out" ? "end" : "start" }, "×" + n.item.lines.length));
+        }
+      }
+      for (const { x, y, n } of positions.values()) {
+        const g = svg("g", { class: "gnode k-" + n.kind + (n.depth === 0 ? " root" : "") + (n.item.low ? " low" : "")
+          + (n.cycle ? " cycle" : ""), transform: `translate(${x},${y})` });
+        g.append(svg("rect", { class: "box", width: n.w, height: G.nodeH, rx: 7 }));
+        const tx0 = dir === "in" && n.expandable ? 14 : 0; // leave room for the left-side toggle
+        g.append(svg("rect", { class: "stripe", width: 4, height: G.nodeH - 10, x: tx0, y: 5, rx: 2 }));
+        g.append(svg("text", { class: "glabel", x: tx0 + 12, y: 17 }, n.label));
+        g.append(svg("text", { class: "gmeta", x: tx0 + 12, y: 33 }, n.cycle ? "↻ recursive · " + n.meta : n.item.low ? "guess · " + n.meta : n.meta));
+        const tip = n.kind === "ext" ? "Not defined in this codebase" : n.kind === "amb" ? "Several functions share this name"
+          : qname(FUNCS[n.item.id]) + "\n" + fileOf(FUNCS[n.item.id]) + ":" + FUNCS[n.item.id].l;
+        g.append(svg("title", null, tip + (n.depth && n.kind !== "ext" && n.kind !== "amb" ? "\n\nClick to open" : "")));
+        if (n.expandable) {
+          const tx = dir === "out" ? n.w - 2 : 2;
+          const t = svg("g", { class: "toggle", transform: `translate(${tx},${G.nodeH / 2})` },
+            svg("circle", { r: 9 }), svg("text", { "text-anchor": "middle", y: 4 }, n.open ? "−" : "+"));
+          t.addEventListener("click", (e) => { e.stopPropagation(); toggle(n); });
+          g.append(t);
+        }
+        g.addEventListener("click", () => {
+          if (moved) return;
+          if (n.item.type === "fn" && n.depth > 0) go(n.item.id, dir);
+          else toggle(n);
+        });
+        g.addEventListener("mouseenter", () => {
+          for (const p of edgeLayer.querySelectorAll(".hot")) p.classList.remove("hot");
+          markPath(n);
+          if (n.depth === 1 && dir === "out") highlightLines(codeBox, n.item.lines, true);
+        });
+        g.addEventListener("mouseleave", () => {
+          for (const p of svgEl.querySelectorAll(".hot")) p.classList.remove("hot");
+          if (n.depth === 1 && dir === "out") highlightLines(codeBox, [], false);
+        });
+        n.g = g;
+        nodeLayer.append(g);
+      }
+    }
+    function markPath(n) {
+      const keys = new Set();
+      for (let p = n; p; p = p.parent) { keys.add(p.key); p.g && p.g.classList.add("hot"); }
+      const paths = edgeLayer.querySelectorAll("path");
+      let i = 0;
+      for (const { n: m } of positions.values()) {
+        if (!m.parent) continue;
+        if (keys.has(m.key)) paths[i].classList.add("hot");
+        i++;
+      }
+    }
+
+    function rerender(anchor) {
+      const before = anchor && positions.get(anchor.key);
+      layout(); draw();
+      const after = anchor && positions.get(anchor.key);
+      if (before && after) { // keep the clicked node where it was on screen
+        view.x += (before.x - after.x) * view.k; view.y += (before.y - after.y) * view.k; applyView();
+      }
+    }
+    function toggle(n) { if (!n.expandable) return; n.open = !n.open; rerender(n); }
+    function expandLevel() {
+      let frontier = [root];
+      while (frontier.length) { // find the shallowest collapsed level and open it
+        const closed = frontier.filter((n) => n.expandable && !n.open);
+        if (closed.length) { closed.forEach((n) => (n.open = true)); break; }
+        frontier = frontier.flatMap((n) => (n.open ? children(n) : []));
+      }
+      layout(); draw(); fit();
+    }
+    function collapseAll() {
+      const walk = (n) => { if (n.kids) n.kids.forEach((k) => { k.open = false; walk(k); }); };
+      walk(root); root.open = root.expandable; layout(); draw(); fit();
+    }
+    function bounds() {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const { x, y, n } of positions.values()) {
+        x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x + n.w); y1 = Math.max(y1, y + G.nodeH);
+      }
+      return { x0, y0, x1, y1 };
+    }
+    function fit() {
+      const b = bounds(), W = wrap.clientWidth || 600, H = wrap.clientHeight || 400, pad = 24;
+      const k = Math.max(0.45, Math.min(1, (W - 2 * pad) / (b.x1 - b.x0), (H - 2 * pad) / (b.y1 - b.y0)));
+      const rootPos = positions.get(root.key);
+      view.k = k;
+      // horizontally: start at the root's side; vertically: centre, but keep the root in view
+      view.x = dir === "out" ? pad - b.x0 * k : W - pad - b.x1 * k;
+      const h = (b.y1 - b.y0) * k;
+      view.y = h <= H - 2 * pad ? (H - h) / 2 - b.y0 * k : H / 2 - (rootPos.y + G.nodeH / 2) * k;
+      applyView();
+    }
+    function zoomBy(f, cx, cy) {
+      const W = wrap.clientWidth, H = wrap.clientHeight;
+      cx = cx ?? W / 2; cy = cy ?? H / 2;
+      const k = Math.max(0.15, Math.min(2.5, view.k * f));
+      view.x = cx - (cx - view.x) * (k / view.k); view.y = cy - (cy - view.y) * (k / view.k); view.k = k;
+      applyView();
+    }
+
+    // pan with drag, zoom with wheel / pinch
+    let drag = null, moved = false;
+    svgEl.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0 || e.target.closest(".toggle")) return;
+      drag = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y, id: e.pointerId }; moved = false;
+    });
+    svgEl.addEventListener("pointermove", (e) => {
+      if (!drag) return;
+      const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+      if (!moved) {
+        if (Math.hypot(dx, dy) < 4) return;
+        moved = true; wrap.classList.add("panning"); svgEl.setPointerCapture(drag.id);
+      }
+      view.x = drag.vx + dx; view.y = drag.vy + dy; applyView();
+    });
+    const endDrag = () => { drag = null; wrap.classList.remove("panning"); setTimeout(() => (moved = false), 0); };
+    svgEl.addEventListener("pointerup", endDrag);
+    svgEl.addEventListener("pointercancel", endDrag);
+    svgEl.addEventListener("wheel", (e) => { // wheel / pinch zooms around the cursor, shift+wheel scrolls sideways
+      e.preventDefault();
+      const r = svgEl.getBoundingClientRect();
+      if (e.shiftKey) { view.x -= e.deltaY || e.deltaX; applyView(); return; }
+      const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+      zoomBy(Math.exp(-dy * (e.ctrlKey ? 0.01 : 0.0015)), e.clientX - r.left, e.clientY - r.top);
+    }, { passive: false });
+
+    layout(); draw();
+    requestAnimationFrame(fit);
+    if (!root.expandable) container.append(el("div", { class: "empty-note graph-empty" },
+      dir === "out" ? (rootFn.calls.length ? "Calls only external functions. Tick “external” to show them." : "This function doesn’t call anything.")
+                    : "No callers found in this codebase. It may be an entry point, a callback, or called dynamically."));
+  }
+
   // ---------------------------------------------------------------- explorer
   const explorer = $("#explorer");
   const dirTree = { dirs: new Map(), files: [] };
@@ -451,12 +704,25 @@
     const codeBox = el("div", { class: "panel-scroll" });
     const tabOut = el("button", { class: "tab" + (dir === "out" ? " active" : ""), onclick: () => go(id, "out") }, "Calls ▸");
     const tabIn = el("button", { class: "tab" + (dir === "in" ? " active" : ""), onclick: () => go(id, "in") }, "◂ Callers");
+    const renderTree = () => {
+      treeBox.className = prefs.view === "list" ? "panel-scroll" : "graph-box";
+      treePanel.classList.toggle("is-graph", prefs.view !== "list");
+      (prefs.view === "list" ? buildCallTree : buildCallGraph)(f, dir, treeBox, codeBox);
+    };
     const opt = (key, label, title) => el("label", { title },
-      el("input", { type: "checkbox", checked: prefs[key], onchange: (e) => { prefs[key] = e.target.checked; savePrefs(); buildCallTree(f, dir, treeBox, codeBox); } }), label);
+      el("input", { type: "checkbox", checked: prefs[key], onchange: (e) => { prefs[key] = e.target.checked; savePrefs(); renderTree(); } }), label);
+    const viewBtn = (v, label, title) => el("button", { class: "tab" + ((prefs.view || "graph") === v ? " active" : ""), title,
+      onclick: (e) => {
+        prefs.view = v; savePrefs();
+        for (const b of e.target.parentNode.children) b.classList.toggle("active", b === e.target);
+        renderTree();
+      } }, label);
     treePanel.append(el("div", { class: "pane-title" }, el("div", { class: "tabs" }, tabOut, tabIn),
-      dir === "out" ? el("div", { class: "opts" },
-        opt("ext", "external", "Show calls to functions that are not defined in this codebase"),
-        opt("low", "guesses", "Show links resolved by name only (lower confidence)")) : null), treeBox);
+      el("div", { class: "opts" },
+        el("div", { class: "tabs seg" }, viewBtn("graph", "Graph", "Functions as nodes with lines to what they call"),
+          viewBtn("list", "List", "Indented list")),
+        dir === "out" ? opt("ext", "external", "Show calls to functions that are not defined in this codebase") : null,
+        dir === "out" ? opt("low", "guesses", "Show links resolved by name only (lower confidence)") : null)), treeBox);
     const split = el("div", { class: "splitter" });
     codePanel.append(el("div", { class: "pane-title" }, el("span", null, "Source"),
       el("span", { class: "opts muted" }, "click a highlighted call to follow it")), codeBox);
@@ -468,7 +734,7 @@
       treePanel.style.width = w + "px"; prefs.treeW = w; savePrefs();
     });
     renderCode(f, codeBox);
-    buildCallTree(f, dir, treeBox, codeBox);
+    renderTree();
     revealInExplorer(f);
   }
 
@@ -510,8 +776,8 @@
       el("div", { class: "cards" }, card(s.files, "files"), card(s.functions, "functions"), card(s.calls, "call sites"),
         card(s.resolved, "linked to code here"), card(s.external, "external / library")),
       el("p", { class: "help" }, "Pick a function in the explorer or search with ", el("kbd", null, "/"),
-        ". The left panel is a tree of everything the function calls (switch to ", el("b", null, "Callers"),
-        " for the reverse). Expand with the arrows, click a name to jump to it, and use ", el("kbd", null, "Alt"), "+",
+        ". The graph shows the function as a node linked to every function it calls (switch to ", el("b", null, "Callers"),
+        " for the reverse). Expand nodes with +, click a node to jump to it, drag to pan, scroll to zoom, and use ", el("kbd", null, "Alt"), "+",
         el("kbd", null, "←"), " to go back. Calls in the source are links too. Links are resolved by name, so ",
         el("span", { style: "color:var(--warn)" }, "amber"), " marks a name with several candidates and dashed underlines mark best guesses."),
       entries.length ? el("h2", null, "Entry points (not called from anywhere, ranked by how much they reach)") : null,

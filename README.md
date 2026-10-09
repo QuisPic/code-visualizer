@@ -13,11 +13,12 @@ Open the generated `<name>-codeviz.html` in a browser. No server, no internet ne
 ## What you get
 
 - **Explorer** (left): directories → files → classes/namespaces → functions.
-- **Call tree** (middle): everything the selected function calls, expandable as deep as you like.
-  Click a name to jump to that function; switch to **Callers** to see the tree in reverse.
-  Recursion is marked instead of expanding forever.
+- **Call graph** (middle): the selected function as a node, connected by lines to the functions
+  it calls. Expand any node with **+** to follow its calls as deep as you like, click a node to jump
+  to that function, drag to pan, scroll to zoom. Switch to **Callers** to grow the graph the other
+  way, or to **List** for an indented-tree view. Recursion is marked instead of expanding forever.
 - **Source** (right): the function's code with syntax highlighting. Every call that leads to a
-  function in the codebase is a link. Hovering a call in the tree highlights where it happens.
+  function in the codebase is a link. Hovering a node in the graph highlights where that call happens.
 - **Search** (`/`), back/forward (`Alt+←/→` or the browser buttons; every view has its own URL),
   light/dark theme, and an overview page listing entry points and the most-called functions.
 
