@@ -23,6 +23,7 @@ Open the generated `<name>-codeviz.html` in a browser. No server, no internet ne
 - **Impact**: the third tab lists everything that can end up calling the function, grouped by how many
   calls away it is, with a summary ("can affect 58 functions in 21 files, reaching 36 entry points").
   Click a row to see where it makes the call; links that rely on a name-only guess are marked.
+  way, to **Both** to see callers on the left and callees on the right of the same node, or to **List** for an indented-tree view. Recursion is marked instead of expanding forever.
 - **Source** (right): the function's code with syntax highlighting. Every call that leads to a
   function in the codebase is a link. Hovering a node in the graph highlights where that call happens.
 - **Hover cards**: rest the pointer on a call in the source, a graph node or a function in a list to
