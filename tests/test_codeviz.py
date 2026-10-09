@@ -46,6 +46,8 @@ def test_cpp(graph):
     assert targets(find("scaled"), "area") == ["geo::Shape.area"]  # header calls into the .cpp
     assert targets(find("main", "shapes.cpp"), "total") == ["geo.total"]
     assert targets(find("total"), "push_back") == []  # std:: stays external
+    # `old::legacy::load` from inside app::legacy::load must not link to itself
+    assert targets(find("load", "codec_new.cpp"), "load") == ["old::legacy.load"]
 
 
 def test_js(graph):
