@@ -36,6 +36,10 @@
   const HAS_TESTS = testFile.some(Boolean);
   const isTest = (id) => testFile[FUNCS[id].f];
   const byFile = FILES.map(() => []);
+  // DATA.link: URL template for the repository's web page ({path}, {line}, {end}), set by the CLI
+  const LINK_HOST = DATA.link ? (/^https?:\/\/([^/]+)/.exec(DATA.link) || [, "source"])[1] : null;
+  const webLink = (f) => DATA.link.replace("{path}", fileOf(f).split("/").map(encodeURIComponent).join("/"))
+    .replace("{line}", f.l).replace("{end}", Math.max(f.l, f.e));
   for (const f of FUNCS) byFile[f.f].push(f);
 
   const prefs = loadPrefs();
@@ -1337,6 +1341,7 @@
       el("div", { class: "fn-title" }, el("span", { class: "icon " + f.k }, KIND_LETTER[f.k]), fnLabel(f), starButton(id)),
       el("div", { class: "fn-sub" },
         el("span", { class: "mono" }, fileOf(f) + ":" + f.l + (f.e > f.l ? "–" + f.e : "")),
+        DATA.link ? el("a", { class: "web-link", href: webLink(f), target: "_blank", rel: "noopener", title: "Open these lines on " + LINK_HOST }, "↗ " + LINK_HOST) : null,
         el("span", null, f.k),
         el("span", null, "calls " + nCallees + " function" + (nCallees === 1 ? "" : "s") + (nExt ? " (+" + nExt + " external)" : "")),
         el("span", null, "called from " + callers[id].length + " place" + (callers[id].length === 1 ? "" : "s")),
