@@ -208,3 +208,6 @@ def test_typed_receivers(graph):
     assert linked(ride, ride["l"] + 1) == (["Gear.spin"], "h")
     assert linked(ride, ride["l"] + 2) == (["Wheel.spin"], "h")
     assert linked(ride, ride["l"] + 4) == (["Wheel.spin"], "h")
+    fix = find("fix")
+    assert linked(fix, fix["l"] + 1) == (["Pump.inflate"], "h")
+    assert linked(fix, fix["l"] + 2) == (["Valve.inflate"], "h")

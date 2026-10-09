@@ -103,7 +103,7 @@ def _first_arg(args: str) -> str:
 
 def _type_name(text: str) -> str | None:
     """Class name from a declared type: `const ns::Foo&` -> Foo, `std::unique_ptr<Foo>` -> Foo."""
-    text = _TYPE_NOISE.sub(" ", text.strip().strip("'\"")).strip()
+    text = _TYPE_NOISE.sub(" ", text.strip().lstrip(":").strip().strip("'\"")).strip()  # TS `: Foo`
     text = text.split("|")[0].strip()  # `Foo | None`
     for _ in range(4):
         m = re.fullmatch(r"([\w:.]+)\s*[<\[](.*)[>\]]", text, re.S)
