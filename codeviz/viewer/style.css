@@ -304,3 +304,17 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height:
 .never-called summary h2 { display: inline-block; }
 .never-called summary h2::before { content: "▸ "; }
 .never-called[open] summary h2::before { content: "▾ "; }
+/* bookmarks and recent */
+.pins { flex: none; max-height: 45%; overflow: auto; }
+.pins:empty { display: none; }
+.pin-head { cursor: pointer; user-select: none; }
+.pin-head .caret { display: inline-block; width: 10px; }
+.pin-head .badge { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.pin-list { padding: 2px 0 6px; }
+.pin-list .row { padding-left: 10px; }
+.pin-list .row .label { font-family: var(--mono); font-size: 12px; }
+.pin-list .pin-x { margin-left: auto; opacity: 0; font-size: 14px; }
+.pin-list .row:hover .pin-x { opacity: 1; }
+.star { font-size: 17px; line-height: 1; padding: 0 2px; color: var(--muted); }
+.star.on { color: var(--warn); }
+.star:hover { color: var(--warn); }
