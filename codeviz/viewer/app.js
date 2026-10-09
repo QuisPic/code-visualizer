@@ -787,9 +787,45 @@
       const item = (label, fn) => el("button", { onclick: () => { close(); fn(); } }, label);
       const menu = el("div", { class: "export-menu" },
         item("SVG (vector, for docs)", () => download(new Blob([exportSvg()], { type: "image/svg+xml" }), base + ".svg")),
-        item("PNG (2× resolution)", () => exportPng((blob) => download(blob, base + ".png"))));
+        item("PNG (2× resolution)", () => exportPng((blob) => download(blob, base + ".png"))),
+        item("Mermaid (copy for Markdown)", () => copyText("```mermaid\n" + exportMermaid() + "```\n", base + ".md")));
       tools.append(menu);
       document.addEventListener("pointerdown", outside, true);
+    }
+    // Mermaid flowchart of the visible graph; GitHub, GitLab and most wikis render it in Markdown
+    function exportMermaid() {
+      const out = ["flowchart " + (dir === "out" ? "LR" : "RL")];
+      const q = (t) => '"' + t.replace(/"/g, "#quot;") + '"';
+      // a function shown in several branches becomes one Mermaid node, so the export is a real graph
+      const ids = new Map(), idOf = (n) => ids.get(n.item.type === "fn" ? "f" + n.item.id : n.key);
+      const nodes = [...positions.values()].map((p) => p.n).sort((a, b) => a.depth - b.depth || positions.get(a.key).y - positions.get(b.key).y);
+      for (const n of nodes) {
+        const key = n.item.type === "fn" ? "f" + n.item.id : n.key;
+        if (ids.has(key)) continue;
+        ids.set(key, "n" + ids.size);
+        const label = n.kind === "amb" ? n.label + " (" + n.meta + ")" : n.label;
+        out.push("  " + ids.get(key) + (n.kind === "amb" ? "{{" + q(label) + "}}" : "[" + q(label) + "]")
+          + (n.kind === "ext" ? ":::ext" : n.depth === 0 ? ":::root" : ""));
+      }
+      const edges = new Set();
+      for (const n of nodes) {
+        if (!n.parent) continue;
+        const [a, b] = dir === "out" ? [n.parent, n] : [n, n.parent];
+        const times = n.item.lines && n.item.lines.length > 1 ? "|" + q("×" + n.item.lines.length) + "|" : "";
+        const line = "  " + idOf(a) + (n.item.low ? " -.->" : " -->") + times + " " + idOf(b);
+        if (!edges.has(line)) { edges.add(line); out.push(line); }
+      }
+      out.push("  classDef root stroke-width:3px", "  classDef ext stroke-dasharray:4 3,color:#888");
+      return out.join("\n") + "\n";
+    }
+    function copyText(text, fallbackName) {
+      const note = (msg) => {
+        const t = el("span", { class: "export-note" }, msg);
+        tools.append(t); setTimeout(() => t.remove(), 1800);
+      };
+      const save = () => { download(new Blob([text], { type: "text/markdown" }), fallbackName); note("Saved " + fallbackName); };
+      if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(() => note("Copied to clipboard"), save);
+      else save();
     }
     const STYLE_PROPS = ["fill", "fill-opacity", "stroke", "stroke-width", "stroke-dasharray", "stroke-opacity", "opacity",
                          "font-family", "font-size", "font-weight", "display"];
