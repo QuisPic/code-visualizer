@@ -264,3 +264,18 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height:
 .impact-list .via { color: var(--muted); font: 11px var(--mono); flex: none; }
 .impact-list .more { padding: 2px 26px; }
 .badge.entry { background: none; color: var(--accent); border: 1px solid var(--accent); }
+/* path finder */
+.path-pickers { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+.path-pickers .picker { flex: 1 1 260px; max-width: 420px; }
+.path-pickers label { display: flex; gap: 4px; align-items: center; color: var(--muted); cursor: pointer; }
+.path-header .fn-title { font: 600 15px var(--sans); }
+.fn-sub a { color: var(--accent); text-decoration: none; }
+.fn-sub a:hover { text-decoration: underline; }
+.path-summary { background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px; margin: 10px 12px; line-height: 1.6; }
+.chain-group { margin: 6px 12px 12px; }
+.path-head { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding: 3px 0; }
+.chain { list-style: none; margin: 0; padding: 0 0 0 10px; border-left: 2px solid var(--border); }
+.chain li { position: relative; }
+.chain li::before { content: ""; position: absolute; left: -16px; top: 9px; width: 8px; height: 8px; border-radius: 50%; background: var(--bg); border: 2px solid var(--accent); }
+.chain .row .label { font-family: var(--mono); font-size: 12px; }
+.chain .row.low .label { text-decoration: underline dashed var(--muted); text-underline-offset: 3px; }
