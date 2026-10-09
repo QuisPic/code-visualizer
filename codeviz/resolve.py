@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import posixpath
 from collections import defaultdict
+from typing import NamedTuple
 from pathlib import PurePosixPath
 
 from .extract import Call, FileInfo, Function
@@ -23,6 +24,19 @@ def _is_test(path: PurePosixPath) -> bool:
     return any(p.lower() in _TEST_DIRS for p in path.parts[:-1])
 
 
+class _PathInfo(NamedTuple):
+    stem: str
+    parent: str
+    parent_name: str
+    parent_parts: tuple[str, ...]
+    is_test: bool
+
+
+def _path_info(path: str) -> _PathInfo:
+    p = PurePosixPath(path)
+    return _PathInfo(p.stem, str(p.parent), p.parent.name, p.parent.parts, _is_test(p))
+
+
 class Resolver:
     def __init__(self, files: list[FileInfo]):
         self.files = {f.path: f for f in files}
@@ -35,6 +49,10 @@ class Resolver:
             self.by_name[fn.name].append(i)
             if fn.kind == "constructor" and fn.scope:
                 self.ctors[fn.scope[-1]].append(i)
+        # path facts are compared for every candidate of every call, so work them out once
+        self.paths = {path: _path_info(path) for path in self.files}
+        self._cache: dict[tuple, tuple[list[int], str]] = {}
+        self._quals: dict[tuple, tuple[bool, bool, list[str], str]] = {}
         # for import bindings: top-level functions and constructors by (file, name)
         self.in_file: dict[tuple[str, str], list[int]] = defaultdict(list)
         for i, fn in enumerate(self.functions):
@@ -51,6 +69,22 @@ class Resolver:
                 for k in range(1, len(parts) + 1):
                     self.py_modules["/".join(parts[-k:])].append(path)
         self._module_cache: dict[tuple[str, str], str | None] = {}
+
+    def _qualifier(self, q: str | None, caller: Function) -> tuple[bool, bool, list[str], str]:
+        """(self call, self member, qualifier parts, receiver name) for a call's qualifier, cached."""
+        key = (q, caller.lang.name, caller.receiver)
+        hit = self._quals.get(key)
+        if hit is not None:
+            return hit
+        self_call = q is not None and (q in caller.lang.self_names or q in ("this", "super", "parent")
+                                       or q == caller.receiver)
+        self_member = q is not None and not self_call and any(
+            q.startswith(s + sep) for s in caller.lang.self_names | {"this"} for sep in (".", "->"))
+        q_parts = [p for p in (q or "").replace("->", ".").replace("::", ".").split(".") if p]
+        last = q_parts[-1] if q_parts else ""
+        receiver = last.lower().removeprefix("m_").removeprefix("_").replace("_", "")
+        hit = self._quals[key] = (self_call, self_member, q_parts, receiver)
+        return hit
 
     # ---- imports ---------------------------------------------------------------------------
     def module_file(self, importer: str, spec: str) -> str | None:
@@ -154,20 +188,15 @@ class Resolver:
         caller_cls = caller.scope[-1] if caller.scope else None
         cand_cls = cand.scope[-1] if cand.scope else None
         q = call.qualifier
-        self_call = q is not None and (q in caller.lang.self_names or q in ("this", "super", "parent")
-                                       or q == caller.receiver)
-        self_member = q is not None and not self_call and any(
-            q.startswith(s + sep) for s in caller.lang.self_names | {"this"} for sep in (".", "->"))
+        self_call, self_member, q_parts, receiver = self._qualifier(q, caller)
+        last = q_parts[-1] if q_parts else ""
 
         if self_member and caller_cls and cand_cls == caller_cls:
             return None  # `self.items.push()` calls a method of the field, not of our own class
         if self_call:
             score += 100 if caller_cls and cand_cls == caller_cls else (-10 if cand_cls else -40)
         elif q:
-            q_parts = [p for p in q.replace("->", ".").replace("::", ".").split(".") if p]
-            last = q_parts[-1] if q_parts else ""
-            cand_path = PurePosixPath(cand.path)
-            receiver = last.lower().removeprefix("m_").removeprefix("_").replace("_", "")
+            cand_info = self.paths[cand.path]
             if cand.scope and last in cand.scope:
                 score += 80
                 # compare the rest of the qualifier with the scope around that name, right to left:
@@ -180,7 +209,7 @@ class Resolver:
                     score -= 40
                 if end != len(cand.scope) - 1:
                     score -= 30  # the candidate sits in a nested scope the call doesn't name
-            elif last and last in (cand_path.stem, cand_path.parent.name):
+            elif last and last in (cand_info.stem, cand_info.parent_name):
                 score += 60  # module.func() / package.Func()
             elif call.sep == "::":
                 return None  # qualified by a namespace/class we don't have (std::, a library, ...)
@@ -196,30 +225,38 @@ class Resolver:
             elif caller.lang.family in ("python", "js", "go") and cand.kind in ("method", "constructor"):
                 score -= 20  # a bare call in these languages rarely hits a method
 
-        caller_path, cand_path = PurePosixPath(caller.path), PurePosixPath(cand.path)
+        caller_path, cand_path = self.paths[caller.path], self.paths[cand.path]
         if cand.path == caller.path:
             score += 30
         elif cand_path.stem == caller_path.stem and cand_path.parent == caller_path.parent:
             score += 25  # foo.h / foo.cpp
         imports = self.files[caller.path].imports
-        if cand_path.stem in imports or cand_path.parent.name in imports:
+        if cand_path.stem in imports or cand_path.parent_name in imports:
             score += 20
         if cand_path.parent == caller_path.parent:
             score += 10
         else:
             # nearer in the directory tree wins ties between same-named copies
             shared = 0
-            for a, b in zip(caller_path.parent.parts, cand_path.parent.parts):
+            for a, b in zip(caller_path.parent_parts, cand_path.parent_parts):
                 if a != b:
                     break
                 shared += 1
             score += min(shared, 3) * 2
-        if not _is_test(caller_path) and _is_test(cand_path):
+        if not caller_path.is_test and cand_path.is_test:
             score -= 1  # prefer the library copy over a test's private copy
         return score
 
     def resolve(self, caller: Function, call: Call) -> tuple[list[int], str]:
         """Return (target function ids, confidence) where confidence is high | low | ambiguous."""
+        # the answer only depends on these, and the same call repeats a lot within a file
+        key = (caller.path, tuple(caller.scope), caller.receiver, call.name, call.qualifier, call.sep, call.ctor)
+        hit = self._cache.get(key)
+        if hit is None:
+            hit = self._cache[key] = self._resolve(caller, call)
+        return list(hit[0]), hit[1]
+
+    def _resolve(self, caller: Function, call: Call) -> tuple[list[int], str]:
         bound = self._bound(caller, call)
         if bound is not None:
             if not bound:
