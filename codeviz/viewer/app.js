@@ -33,7 +33,7 @@
 
   const prefs = loadPrefs();
   function loadPrefs() {
-    const d = { ext: false, low: true, theme: null, sidebar: null, treeW: null, view: "graph", legend: false };
+    const d = { ext: false, low: true, theme: null, sidebar: null, treeW: null, view: "graph", legend: false, srcTab: "code" };
     try { return Object.assign(d, JSON.parse(localStorage.getItem("codeviz-prefs") || "{}")); } catch { return d; }
   }
   function savePrefs() { try { localStorage.setItem("codeviz-prefs", JSON.stringify(prefs)); } catch { /* ignore */ } }
@@ -203,6 +203,65 @@
       if (on && !first) first = ln;
     }
     if (scroll && first) first.scrollIntoView({ block: "nearest" });
+  }
+
+
+  // ---------------------------------------------------------------- call sites (every line that calls a function)
+  function renderCallSites(f, container) {
+    container.textContent = "";
+    const groups = incoming(f);
+    if (!groups.length) {
+      container.append(el("div", { class: "empty-note" }, "Nothing in this codebase calls " + f.n + "(). It may be an entry point, a callback, or called dynamically."));
+      return;
+    }
+    const wrap = el("div", { class: "sites" });
+    const MAX = 120;
+    for (const g of groups.slice(0, MAX)) {
+      const c = FUNCS[g.id];
+      const head = el("div", { class: "site-head", "data-hc": c.id, "data-hc-hint": "Click to open", onclick: () => go(c.id) },
+        el("span", { class: "icon " + c.k }, KIND_LETTER[c.k]), fnLabel(c),
+        el("span", { class: "meta" }, fileOf(c) + ":" + c.l), g.lines.length > 1 ? el("span", { class: "badge" }, "×" + g.lines.length) : null);
+      wrap.append(head);
+      if (!c.code) { // top-level code keeps no source; just say where
+        wrap.append(el("div", { class: "site-note muted" }, "top level, line " + g.lines.join(", ")));
+        continue;
+      }
+      const fam = FAMILY[FILES[c.f].lang] || "c";
+      const cls = highlight(c.code, fam);
+      const starts = [0];
+      for (let i = 0; i < c.code.length; i++) if (c.code.charCodeAt(i) === 10) starts.push(i + 1);
+      // the exact call tokens to mark: calls on these lines that link to f
+      const hits = c.calls.filter((k) => k.t && k.t.includes(f.id));
+      const want = new Set();
+      for (const ln of g.lines) for (let l = ln - 1; l <= ln + 1; l++) if (l >= c.l && l <= c.e) want.add(l);
+      const lines = [...want].sort((a, b) => a - b);
+      const lineText = (ln) => c.code.slice(starts[ln - c.l], ln - c.l + 1 < starts.length ? starts[ln - c.l + 1] - 1 : c.code.length);
+      // drop the indentation the snippet lines share so the call is visible without scrolling sideways
+      const indent = Math.min(...lines.map(lineText).filter((t) => t.trim()).map((t) => t.length - t.trimStart().length));
+      const code = el("div", { class: "code site-code" });
+      let prev = null;
+      for (const ln of lines) {
+        if (prev != null && ln > prev + 1) code.append(el("div", { class: "site-gap" }, "⋯"));
+        prev = ln;
+        const li = ln - c.l, s1 = li + 1 < starts.length ? starts[li + 1] - 1 : c.code.length;
+        const s0 = Math.min(starts[li] + (Number.isFinite(indent) ? indent : 0), s1);
+        const mark = new Set();
+        for (const k of hits) if (k.l === ln) for (let i = 0; i < k.n.length; i++) mark.add(starts[li] + k.c + i);
+        const src = el("span", { class: "src" });
+        for (let i = s0; i < s1;) {
+          let j = i + 1;
+          while (j < s1 && cls[j] === cls[i] && mark.has(j) === mark.has(i)) j++;
+          const text = c.code.slice(i, j);
+          src.append(mark.has(i) ? el("span", { class: "site-hit" }, text) : cls[i] ? el("span", { class: CLS[cls[i]] }, text) : text);
+          i = j;
+        }
+        code.append(el("div", { class: "sl" + (g.lines.includes(ln) ? " hit" : "") }, el("span", { class: "gutter" }, String(ln)), src));
+      }
+      code.addEventListener("click", () => go(c.id));
+      wrap.append(code);
+    }
+    if (groups.length > MAX) wrap.append(el("div", { class: "empty-note" }, "… and " + (groups.length - MAX) + " more callers"));
+    container.append(wrap);
   }
 
   // ---------------------------------------------------------------- choice popup (ambiguous calls)
@@ -1139,11 +1198,24 @@
         dir !== "in" ? opt("low", "guesses", "Show links resolved by name only (lower confidence)") : null)), treeBox);
     const split = el("div", { class: "splitter" });
     const srcTitle = el("span", { class: "src-title" });
+    // the source pane shows either the function's code or every place that calls it
+    let shownFid = null;
+    const srcTab = (v, label, title) => el("button", { class: "tab" + ((prefs.srcTab || "code") === v ? " active" : ""), title,
+      onclick: (e) => {
+        prefs.srcTab = v; savePrefs();
+        for (const b of e.currentTarget.parentNode.children) b.classList.toggle("active", b === e.currentTarget);
+        if (shownFid != null) showSource(shownFid);
+      } }, ...[].concat(label));
+    const usesCount = el("span", { class: "count" });
     codePanel.append(el("div", { class: "pane-title" }, srcTitle,
-      el("span", { class: "opts muted" }, "click a call to follow it")), codeBox);
+      el("div", { class: "tabs seg" }, srcTab("code", "Code", "The function's source; click a call to follow it"),
+        srcTab("uses", ["Call sites", usesCount], "Every line in this codebase that calls the function, with a little context")))
+      , codeBox);
     // fid = function to show; or null with a note (external / ambiguous graph nodes)
     function showSource(fid, note, lines) {
       srcTitle.textContent = "";
+      shownFid = fid;
+      usesCount.textContent = fid == null ? "" : " " + callers[fid].length;
       if (fid == null) {
         delete codeBox.dataset.fn;
         codeBox.textContent = "";
@@ -1152,8 +1224,8 @@
         return;
       }
       const sf = FUNCS[fid];
-      codeBox.dataset.fn = fid;
-      renderCode(sf, codeBox, lines);
+      if (prefs.srcTab === "uses") { delete codeBox.dataset.fn; renderCallSites(sf, codeBox); }
+      else { codeBox.dataset.fn = fid; renderCode(sf, codeBox, lines); }
       codeBox.scrollTop = 0;
       if (lines && lines.length) highlightLines(codeBox, lines, true);
       if (fid === f.id) { srcTitle.append("Source"); return; }
