@@ -567,6 +567,16 @@ class _Extractor:
                             self.bases[".".join(child_scope)] = bases
                     else:
                         child_in_class = False
+            elif t == "type_spec" and lang.name == "go":
+                # Go embedding: `type Dog struct { Animal }` gives Dog the methods of Animal
+                body = node.child_by_field_name("type")
+                fields = body.named_children[0].named_children if body is not None and body.type == "struct_type" \
+                    and body.named_children else []
+                embedded = [f.child_by_field_name("type") for f in fields
+                            if f.type == "field_declaration" and f.child_by_field_name("name") is None]
+                bases = [b for e in embedded if e is not None for b in _base_names(e)]
+                if bases:
+                    self.bases[".".join(scope + [_text(node.child_by_field_name("name"))])] = bases
             elif t in lang.functions and not (lang.family == "c" and node.child_by_field_name("body") is None):
                 parts = self._function_name(node)
                 if parts and all(parts):
