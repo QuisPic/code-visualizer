@@ -318,3 +318,4 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height:
 .star { font-size: 17px; line-height: 1; padding: 0 2px; color: var(--muted); }
 .star.on { color: var(--warn); }
 .star:hover { color: var(--warn); }
+.list-head { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding: 8px 10px 2px; }

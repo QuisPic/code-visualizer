@@ -446,16 +446,20 @@
     const sans = getComputedStyle(document.documentElement).getPropertyValue("--sans").trim();
     G.font = "600 12px " + mono; G.metaFont = "11px " + sans; G.sans = sans;
 
-    // graph nodes are created lazily as branches are expanded
-    const makeNode = (item, parent) => {
-      const n = { item, parent, depth: parent ? parent.depth + 1 : 0, kids: null, open: false,
-                  key: (parent ? parent.key + ">" : "") + (item.type === "fn" ? item.id : item.type + ":" + item.name) };
+    // graph nodes are created lazily as branches are expanded. Each node grows to one side: "out" (callees,
+    // to the right) or "in" (callers, to the left); in the "both" view the root grows to both sides.
+    const both = dir === "both";
+    const makeNode = (item, parent, side) => {
+      side = side || (parent ? parent.side : dir);
+      const n = { item, parent, side, depth: parent ? parent.depth + 1 : 0, kids: null, open: false,
+                  key: (parent ? parent.key + ">" : "") + (both && parent && !parent.parent ? side + ":" : "")
+                    + (item.type === "fn" ? item.id : item.type + ":" + item.name) };
       const anc = new Set();
       for (let p = parent; p; p = p.parent) if (p.item.type === "fn") anc.add(p.item.id);
       n.cycle = item.type === "fn" && anc.has(item.id);
       if (item.type === "fn") {
         const f = FUNCS[item.id];
-        n.expandable = !n.cycle && (dir === "out" ? f.calls.some((c) => c.t) : callers[f.id].length > 0);
+        n.expandable = !n.cycle && ((side !== "in" && f.calls.some((c) => c.t)) || (side !== "out" && callers[f.id].length > 0));
         n.label = (f.s ? f.s + sep(f) : "") + (f.k === "toplevel" ? f.n : f.n + "()");
         n.meta = fileOf(f).split("/").pop() + ":" + f.l;
         n.kind = f.k;
@@ -480,20 +484,28 @@
     const childItems = (n) => {
       if (!n.items) {
         const it = n.item;
-        n.items = it.type === "fn" ? (dir === "out" ? outgoing(FUNCS[it.id]) : incoming(FUNCS[it.id]))
-          : it.type === "amb" ? it.targets.map((id) => ({ type: "fn", id, lines: [] })) : [];
+        if (it.type === "fn" && n.side === "both") {
+          const f = FUNCS[it.id];
+          n.items = [...outgoing(f).map((k) => ({ ...k, side: "out" })), ...incoming(f).map((k) => ({ ...k, side: "in" }))];
+        } else {
+          n.items = it.type === "fn" ? (n.side === "out" ? outgoing(FUNCS[it.id]) : incoming(FUNCS[it.id]))
+            : it.type === "amb" ? it.targets.map((id) => ({ type: "fn", id, lines: [] })) : [];
+        }
       }
       return n.items;
     };
     const children = (n) => {
-      if (!n.kids) n.kids = childItems(n).map((k) => makeNode(k, n));
+      if (!n.kids) n.kids = childItems(n).map((k) => makeNode(k, n, k.side));
       return n.kids;
     };
     const root = makeNode({ type: "fn", id: rootFn.id, lines: [] }, null);
     root.open = root.expandable;
     if (root.open) {
       const kids = children(root);
-      if (kids.length <= 6) for (const k of kids) if (k.expandable && !k.cycle) k.open = true;
+      for (const side of ["out", "in"]) {
+        const ks = kids.filter((k) => k.side === side);
+        if (ks.length <= (both ? 4 : 6)) for (const k of ks) if (k.expandable && !k.cycle) k.open = true;
+      }
     }
 
     // ---- view: svg with pan/zoom
@@ -523,28 +535,32 @@
 
     let positions = new Map(); // key -> {x, y, n}: tidy-tree layout, before any dragging
     function layout() {
-      // column widths per depth, rows by leaf count (tidy tree)
-      const colW = [];
-      const visit = (n) => {
-        colW[n.depth] = Math.max(colW[n.depth] || 0, n.w);
-        if (n.open) for (const k of children(n)) visit(k);
-      };
-      visit(root);
-      const colX = [0];
-      for (let d = 1; d < colW.length; d++) colX[d] = colX[d - 1] + colW[d - 1] + G.colGap;
+      // a tidy tree per side: column widths per depth, rows by leaf count; each side is then shifted so
+      // the root sits at y = 0 and x = 0, callees growing right and callers growing left
       positions = new Map();
-      let row = 0;
-      const place = (n) => {
-        let y;
-        const kids = n.open ? children(n) : [];
-        if (!kids.length) { y = row * (G.nodeH + G.rowGap); row++; }
-        else { const ys = kids.map(place); y = (ys[0] + ys[ys.length - 1]) / 2; }
-        // callers grow to the left: mirror x and right-align nodes in their column
-        const x = dir === "out" ? colX[n.depth] : -colX[n.depth] - n.w;
-        positions.set(n.key, { x, y, n });
-        return y;
-      };
-      place(root);
+      for (const side of both ? ["out", "in"] : [dir]) {
+        const kidsOf = (n) => (n.open ? children(n).filter((k) => k.side === side) : []);
+        const colW = [];
+        const visit = (n) => { colW[n.depth] = Math.max(colW[n.depth] || 0, n.w); for (const k of kidsOf(n)) visit(k); };
+        visit(root);
+        const colX = [0];
+        for (let d = 1; d < colW.length; d++) colX[d] = colX[d - 1] + colW[d - 1] + G.colGap;
+        let row = 0;
+        const placed = [];
+        const place = (n) => {
+          let y;
+          const kids = kidsOf(n);
+          if (!kids.length) { y = row * (G.nodeH + G.rowGap); row++; }
+          else { const ys = kids.map(place); y = (ys[0] + ys[ys.length - 1]) / 2; }
+          // callers are right-aligned in their column, mirrored around the root's left edge
+          const x = side === "out" ? colX[n.depth] : -(colX[n.depth] - colW[0]) - n.w;
+          if (n !== root) placed.push({ x, y, n });
+          return y;
+        };
+        const rootY = place(root);
+        for (const p of placed) { p.y -= rootY; positions.set(p.n.key, p); }
+      }
+      positions.set(root.key, { x: 0, y: 0, n: root });
     }
     // where a node is drawn: its layout slot plus its own and its ancestors' drag offsets
     // (dragging a node carries its subtree along)
@@ -559,7 +575,8 @@
     function edgePath(n) {
       const p = pos(n.parent), c = pos(n);
       const cy = c.y + G.nodeH / 2, py = p.y + G.nodeH / 2;
-      const x1 = dir === "out" ? p.x + n.parent.w : p.x, x2 = dir === "out" ? c.x : c.x + n.w;
+      const out = n.side === "out";
+      const x1 = out ? p.x + n.parent.w : p.x, x2 = out ? c.x : c.x + n.w;
       const mx = (x1 + x2) / 2;
       return { d: `M${x1},${py} C${mx},${py} ${mx},${cy} ${x2},${cy}`, x2, cy };
     }
@@ -569,7 +586,7 @@
       if (n.edge) {
         const e = edgePath(n);
         n.edge.setAttribute("d", e.d);
-        if (n.edgeLabel) { n.edgeLabel.setAttribute("x", e.x2 + (dir === "out" ? -6 : 6)); n.edgeLabel.setAttribute("y", e.cy - 5); }
+        if (n.edgeLabel) { n.edgeLabel.setAttribute("x", e.x2 + (n.side === "out" ? -6 : 6)); n.edgeLabel.setAttribute("y", e.cy - 5); }
       }
     }
     function raise(n) { nodeLayer.append(n.g); for (const k of visibleKids(n)) raise(k); }
@@ -584,7 +601,7 @@
         n.edge = svg("path", { class: cls });
         edgeLayer.append(n.edge);
         if (n.item.lines && n.item.lines.length > 1) {
-          n.edgeLabel = svg("text", { class: "edge-label", "text-anchor": dir === "out" ? "end" : "start" }, "×" + n.item.lines.length);
+          n.edgeLabel = svg("text", { class: "edge-label", "text-anchor": n.side === "out" ? "end" : "start" }, "×" + n.item.lines.length);
           edgeLayer.append(n.edgeLabel);
         }
       }
@@ -597,7 +614,7 @@
           + (n.cycle ? " cycle" : "") + (n.key === selectedKey ? " selected" : "") });
         g._node = n;
         g.append(svg("rect", { class: "box", width: n.w, height: G.nodeH, rx: 7 }));
-        const tx0 = dir === "in" && n.expandable ? 14 : 0; // leave room for the left-side toggle
+        const tx0 = n.side === "in" && n.expandable ? 14 : 0; // leave room for the left-side toggle
         g.append(svg("rect", { class: "stripe", width: 4, height: G.nodeH - 10, x: tx0, y: 5, rx: 2 }));
         g.append(svg("text", { class: "glabel", x: tx0 + 12, y: 17 }, n.label));
         g.append(svg("text", { class: "gmeta", x: tx0 + 12, y: 33 }, n.metaText));
@@ -608,7 +625,7 @@
           : "x:" + n.label.replace(/\(\)$/, ""));
         g.setAttribute("data-hc-hint", how[0].toUpperCase() + how.slice(1));
         if (n.expandable) {
-          const tx = dir === "out" ? n.w - 2 : 2;
+          const tx = n.side === "in" ? 2 : n.w - 2;
           // collapsed: a pill saying how many calls are hidden behind the node; open: a "−" circle
           const label = n.open ? "−" : "+" + childItems(n).length;
           const pw = n.open ? 18 : Math.max(18, textWidth(label, "700 11px " + G.sans) + 10);
@@ -619,12 +636,12 @@
         g.addEventListener("mouseenter", () => {
           if (drag && drag.moved) return;
           markPath(n);
-          if (n.depth === 1 && dir === "out" && showingRoot()) highlightLines(codeBox, n.item.lines, true);
+          if (n.depth === 1 && n.side === "out" && showingRoot()) highlightLines(codeBox, n.item.lines, true);
         });
         g.addEventListener("mouseleave", () => {
           if (drag && drag.moved) return;
           for (const p of svgEl.querySelectorAll(".hot")) p.classList.remove("hot");
-          if (n.depth === 1 && dir === "out" && showingRoot()) highlightLines(codeBox, [], false);
+          if (n.depth === 1 && n.side === "out" && showingRoot()) highlightLines(codeBox, [], false);
         });
         n.g = g;
         nodeLayer.append(g);
@@ -693,7 +710,9 @@
       const rootPos = pos(root);
       view.k = k;
       // horizontally: start at the root's side; vertically: centre, but keep the root in view
-      view.x = dir === "out" ? pad - b.x0 * k : W - pad - b.x1 * k;
+      const gw = (b.x1 - b.x0) * k;
+      view.x = dir === "out" ? pad - b.x0 * k : dir === "in" ? W - pad - b.x1 * k
+        : gw <= W - 2 * pad ? (W - gw) / 2 - b.x0 * k : W / 2 - (rootPos.x + root.w / 2) * k; // both: centre, else the root
       const h = (b.y1 - b.y0) * k;
       view.y = h <= H - 2 * pad ? (H - h) / 2 - b.y0 * k : H / 2 - (rootPos.y + G.nodeH / 2) * k;
       applyView();
@@ -772,7 +791,7 @@
     layout(); draw();
     requestAnimationFrame(fit);
     if (!root.expandable) container.append(el("div", { class: "empty-note graph-empty" },
-      dir === "out" ? (rootFn.calls.length ? "Calls only external functions. Tick “external” to show them." : "This function doesn’t call anything.")
+      both ? "Nothing in this codebase calls this function, and it calls nothing here." : dir === "out" ? (rootFn.calls.length ? "Calls only external functions. Tick “external” to show them." : "This function doesn’t call anything.")
                     : "No callers found in this codebase. It may be an entry point, a callback, or called dynamically."));
   }
 
@@ -1081,6 +1100,8 @@
     const codeBox = el("div", { class: "panel-scroll" });
     const tabOut = el("button", { class: "tab" + (dir === "out" ? " active" : ""), onclick: () => go(id, "out") }, "Calls ▸");
     const tabIn = el("button", { class: "tab" + (dir === "in" ? " active" : ""), onclick: () => go(id, "in") }, "◂ Callers");
+    const tabBoth = el("button", { class: "tab" + (dir === "both" ? " active" : ""), onclick: () => go(id, "both"),
+      title: "Callers on the left, callees on the right" }, "◂ Both ▸");
     const tabImpact = el("button", { class: "tab" + (dir === "impact" ? " active" : ""), onclick: () => go(id, "impact"),
       title: "Everything that can end up calling this function, grouped by distance" }, "Impact");
     const renderTree = () => {
@@ -1093,7 +1114,13 @@
       }
       treeBox.className = prefs.view === "list" ? "panel-scroll" : "graph-box";
       treePanel.classList.toggle("is-graph", prefs.view !== "list");
-      if (prefs.view === "list") buildCallTree(f, dir, treeBox, codeBox);
+      if (prefs.view === "list" && dir === "both") {
+        treeBox.textContent = "";
+        const outBox = el("div"), inBox = el("div");
+        treeBox.append(el("div", { class: "list-head" }, "Calls"), outBox, el("div", { class: "list-head" }, "Called by"), inBox);
+        buildCallTree(f, "out", outBox, codeBox);
+        buildCallTree(f, "in", inBox, codeBox);
+      } else if (prefs.view === "list") buildCallTree(f, dir, treeBox, codeBox);
       else buildCallGraph(f, dir, treeBox, codeBox, showSource);
     };
     const opt = (key, label, title) => el("label", { title },
@@ -1104,11 +1131,11 @@
         for (const b of e.target.parentNode.children) b.classList.toggle("active", b === e.target);
         renderTree();
       } }, label);
-    treePanel.append(el("div", { class: "pane-title" }, el("div", { class: "tabs" }, tabOut, tabIn, tabImpact),
+    treePanel.append(el("div", { class: "pane-title" }, el("div", { class: "tabs" }, tabOut, tabIn, tabBoth, tabImpact),
       el("div", { class: "opts" },
         dir === "impact" ? null : el("div", { class: "tabs seg" }, viewBtn("graph", "Graph", "Functions as nodes with lines to what they call"),
           viewBtn("list", "List", "Indented list")),
-        dir === "out" ? opt("ext", "external", "Show calls to functions that are not defined in this codebase") : null,
+        dir === "out" || dir === "both" ? opt("ext", "external", "Show calls to functions that are not defined in this codebase") : null,
         dir !== "in" ? opt("low", "guesses", "Show links resolved by name only (lower confidence)") : null)), treeBox);
     const split = el("div", { class: "splitter" });
     const srcTitle = el("span", { class: "src-title" });
@@ -1552,12 +1579,12 @@
 
   // ---------------------------------------------------------------- routing
   function go(id, dir) {
-    const h = "#/f/" + id + (dir === "in" ? "/in" : dir === "impact" ? "/impact" : "");
+    const h = "#/f/" + id + (dir === "out" || !dir ? "" : "/" + dir);
     if (location.hash !== h) location.hash = h; else route();
   }
   function route() {
     hidePopup(); hideCard();
-    const m = /^#\/f\/(\d+)(?:\/(in|impact))?/.exec(location.hash);
+    const m = /^#\/f\/(\d+)(?:\/(in|both|impact))?/.exec(location.hash);
     const p = /^#\/path\/(\d*)\/(\d*)/.exec(location.hash);
     if (m) showFunction(+m[1], m[2] || "out");
     else if (p) showPath(p[1] === "" ? null : +p[1], p[2] === "" ? null : +p[2]);
