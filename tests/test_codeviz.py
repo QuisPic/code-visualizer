@@ -147,3 +147,21 @@ def test_import_bindings(graph):
     # `import * as strings` -> util/strings.js, not the local pad()
     pads = [c for c in find("row")["calls"] if c["n"] == "pad"]
     assert [data["files"][data["funcs"][c["t"][0]]["f"]]["p"] for c in pads] == ["util/strings.js", "table.js"]
+
+
+def test_changed_since(tmp_path):
+    import subprocess
+
+    def git(*args):
+        subprocess.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)
+
+    (tmp_path / "a.py").write_text("def keep():\n    return 1\n\n\ndef edit():\n    return 2\n")
+    git("init", "-q", "-b", "main")
+    git("add", ".")
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "base")
+    (tmp_path / "a.py").write_text("def keep():\n    return 1\n\n\ndef edit():\n    return 3\n")
+    (tmp_path / "b.py").write_text("def fresh():\n    return edit()\n")  # untracked
+    data = build(tmp_path, "t", [], quiet=True, changed_since="main")
+    ch = {f["n"]: f.get("ch") for f in data["funcs"] if f["k"] != "toplevel"}
+    assert ch == {"keep": None, "edit": "m", "fresh": "n"}
+    assert data["changed"] == {"ref": "main", "functions": 2}

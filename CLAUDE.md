@@ -35,7 +35,8 @@ Keys are deliberately short to keep pages small. `files[]`: `{p: path, lang, lin
 `funcs[]` (index = id): `{id, n: name, s: scope ("::"-joined for c/rust/php, else "."),
 f: file index, l/e: start/end line, k: kind, code, d?: doc comment / docstring, cx?: cyclomatic
 complexity (omitted when 1), calls[]}`. Each call:
-`{n: name, l: line, c: column, q?: qualifier, t?: [target ids], x?: "h"|"l"|"a"}`. A call with
+`{n: name, l: line, c: column, q?: qualifier, t?: [target ids], x?: "h"|"l"|"a"}`. With `--changed-since`, changed functions get `ch: "n"|"m"` (new / modified) and the
+top level gets `changed: {ref, functions}`. A call with
 no `t` is external. `stats` holds counts. Changing a key means changing `project.py`,
 `viewer/app.js` and the tests together.
 

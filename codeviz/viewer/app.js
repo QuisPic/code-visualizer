@@ -393,6 +393,18 @@
     label.append(f.k === "toplevel" ? f.n : f.n + "()");
     return label;
   }
+  // ---------------------------------------------------------------- changed since a ref (--changed-since)
+  const CHANGED = DATA.changed || null;
+  const chFiles = new Set(), chDirs = new Set();
+  for (const f of FUNCS) if (f.ch) {
+    chFiles.add(f.f);
+    const parts = FILES[f.f].p.split("/");
+    for (let i = 1; i < parts.length; i++) chDirs.add(parts.slice(0, i).join("/"));
+  }
+  const chWord = (f) => (f.ch === "n" ? "new" : "changed");
+  const chDot = (f, what) => el("span", { class: "ch-dot" + (f && f.ch === "n" ? " new" : ""),
+    title: (f ? chWord(f) : what) + " since " + CHANGED.ref });
+
   function fnRow(f, onclick, showPath) {
     return el("li", null, el("div", { class: "row", onclick, "data-hc": f.id },
       el("span", { class: "caret leaf" }, "▸"),
@@ -686,12 +698,14 @@
       for (const n of order) {
         const g = svg("g", { class: "gnode k-" + n.kind + (n.depth === 0 ? " root" : "") + (n.item.low ? " low" : "")
           + (n.cycle ? " cycle" : "") + (n.key === selectedKey ? " selected" : "") });
+        const chFn = n.item.type === "fn" && FUNCS[n.item.id].ch ? FUNCS[n.item.id] : null;
         g._node = n;
         g.append(svg("rect", { class: "box", width: n.w, height: G.nodeH, rx: 7 }));
         const tx0 = n.side === "in" && n.expandable ? 14 : 0; // leave room for the left-side toggle
         g.append(svg("rect", { class: "stripe", width: 4, height: G.nodeH - 10, x: tx0, y: 5, rx: 2 }));
         g.append(svg("text", { class: "glabel", x: tx0 + 12, y: 17 }, n.label));
         g.append(svg("text", { class: "gmeta", x: tx0 + 12, y: 33 }, n.metaText));
+        if (chFn) g.append(svg("circle", { class: "ch-mark" + (chFn.ch === "n" ? " new" : ""), cx: n.w - 8, cy: 8, r: 3.5 }));
         const isFn = n.item.type === "fn";
         const how = [n.kind === "ext" ? null : "click to see its code", isFn && n.depth ? "double-click to open" : null,
                      n.expandable ? (n.open ? "− to collapse" : "+ to expand (shift: 3 levels)") : null, "drag to move"].filter(Boolean).join(" · ");
@@ -1158,13 +1172,17 @@
     for (const [n0, d0] of dirs) {
       const [name, dd] = compact(n0, d0);
       const path = prefix + name;
-      ul.append(explorerItem("d:" + path, "dir", "▤", name + "/", null, (cu) => renderDir(cu, dd, path + "/")).li);
+      const item = explorerItem("d:" + path, "dir", "▤", name + "/", null, (cu) => renderDir(cu, dd, path + "/"));
+      if (chDirs.has(path)) item.row.append(chDot(null, "has changes"));
+      ul.append(item.li);
     }
     for (const fi of d.files.slice().sort((a, b) => FILES[a].p.localeCompare(FILES[b].p))) {
       const file = FILES[fi];
       const fns = byFile[fi];
-      ul.append(explorerItem("f:" + file.p, "file", "▫", file.p.split("/").pop(), fns.length ? String(fns.filter((f) => f.k !== "toplevel").length) : null,
-        fns.length ? (cu) => renderFile(cu, fi) : null).li);
+      const item = explorerItem("f:" + file.p, "file", "▫", file.p.split("/").pop(), fns.length ? String(fns.filter((f) => f.k !== "toplevel").length) : null,
+        fns.length ? (cu) => renderFile(cu, fi) : null);
+      if (chFiles.has(fi)) item.row.append(chDot(null, "has changes"));
+      ul.append(item.li);
     }
   }
   function renderFile(ul, fi) {
@@ -1179,13 +1197,16 @@
         const item = explorerItem("fn:" + f.id, f.k, KIND_LETTER[f.k], f.k === "toplevel" ? f.n : f.n + "()", ":" + f.l, null, () => go(f.id));
         item.row.removeAttribute("title");
         item.row.dataset.hc = f.id;
+        if (f.ch) item.row.append(chDot(f));
         target.append(item.li);
       }
     };
     if (scopes.has("")) addFns(ul, scopes.get(""));
     for (const [s, list] of scopes) {
       if (!s) continue;
-      ul.append(explorerItem("s:" + fi + ":" + s, "scope", "{}", s, String(list.length), (cu) => addFns(cu, list)).li);
+      const item = explorerItem("s:" + fi + ":" + s, "scope", "{}", s, String(list.length), (cu) => addFns(cu, list));
+      if (list.some((f) => f.ch)) item.row.append(chDot(null, "has changes"));
+      ul.append(item.li);
     }
   }
   function revealInExplorer(f) {
@@ -1305,6 +1326,7 @@
         el("span", null, "calls " + nCallees + " function" + (nCallees === 1 ? "" : "s") + (nExt ? " (+" + nExt + " external)" : "")),
         el("span", null, "called from " + callers[id].length + " place" + (callers[id].length === 1 ? "" : "s")),
         f.k === "toplevel" ? null : complexityTag(f),
+        f.ch ? el("span", { class: "ch-tag" + (f.ch === "n" ? " new" : "") }, chWord(f) + " since " + CHANGED.ref) : null,
         el("a", { href: "#/path/" + id + "/", title: "Find the chains of calls from this function to another one" }, "find path to…"))));
 
     const body = el("div", { class: "fn-body" });
@@ -1468,6 +1490,13 @@
       .map((f) => ({ f, n: reach(f.id) })).sort((a, b) => b.n - a.n).slice(0, 30);
     const popular = real.map((f) => ({ f, n: new Set(callers[f.id].map((c) => c.from)).size }))
       .filter((x) => x.n > 1).sort((a, b) => b.n - a.n).slice(0, 30);
+    // changed functions, ranked by how many functions can reach them (what the change can affect)
+    const upstream = (id) => {
+      const seen = new Set([id]), stack = [id];
+      while (stack.length && seen.size < 5000) for (const c of callers[stack.pop()]) if (!seen.has(c.from)) { seen.add(c.from); stack.push(c.from); }
+      return seen.size - 1;
+    };
+    const changed = CHANGED ? real.filter((f) => f.ch).map((f) => ({ f, n: upstream(f.id) })).sort((a, b) => b.n - a.n) : [];
     // copy-pasted helpers (the same function in many files) are listed once
     const copies = new Map();
     for (const f of real) {
@@ -1481,6 +1510,7 @@
       const ul = el("ul", { class: "tree fn-list" });
       for (const { f, n, copies } of items) {
         const li = fnRow(f, () => go(f.id), false);
+        if (f.ch) li.firstChild.append(chDot(f));
         li.firstChild.append(el("span", { class: "badge " + (clsFn ? clsFn(n) : "") }, metaFn(n)),
           el("span", { class: "meta" }, fileOf(f) + (copies > 1 ? "  +" + (copies - 1) + " identical cop" + (copies > 2 ? "ies" : "y") : "")));
         ul.append(li);
@@ -1498,6 +1528,9 @@
         " for the reverse). Click a node to see its code, expand it with +, double-click it to open that function, drag nodes to move them, drag the background to pan, scroll to zoom, walk the graph with the arrow keys (Space expands, Enter opens), and use ", el("kbd", null, "Alt"), "+",
         el("kbd", null, "←"), " to go back. Calls in the source are links too. Links are resolved by name, so ",
         el("span", { style: "color:var(--warn)" }, "amber"), " marks a name with several candidates and dashed underlines mark best guesses."),
+      CHANGED ? el("h2", null, "Changed since " + CHANGED.ref + " (" + changed.length + " function" + (changed.length === 1 ? "" : "s")
+        + ", ranked by how many functions can reach them)") : null,
+      CHANGED ? (changed.length ? list(changed, (n) => n + " affected") : el("p", { class: "muted" }, "No functions changed.")) : null,
       el("h2", null, "Codebase map"),
       el("p", { class: "help small" }, "Each box is a file, sized by lines of code. Click a folder to zoom in, a file to list its functions."),
       codebaseMap(),

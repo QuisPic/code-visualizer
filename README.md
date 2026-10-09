@@ -68,7 +68,7 @@ which downloads each language's grammar the first time it is needed.
 ## Options
 
 ```
-codeviz SOURCE [-o OUT.html] [--ref BRANCH] [--name NAME] [-x GLOB ...] [--no-default-excludes] [--json] [--no-compress] [--open]
+codeviz SOURCE [-o OUT.html] [--ref BRANCH] [--name NAME] [-x GLOB ...] [--no-default-excludes] [--changed-since REF] [--json] [--no-compress] [--open]
 ```
 
 | option | |
@@ -77,11 +77,16 @@ codeviz SOURCE [-o OUT.html] [--ref BRANCH] [--name NAME] [-x GLOB ...] [--no-de
 | `--ref` | branch or tag to clone for git URLs |
 | `-x, --exclude` | skip files/dirs matching a glob, repeatable (`-x tests -x 'docs/*'`) |
 | `--no-default-excludes` | also scan `node_modules`, `vendor`, `build`, `dist`, … |
+| `--changed-since REF` | mark functions changed since a branch, tag or commit (e.g. `main`), uncommitted edits included |
 | `--json` | also write the raw call graph next to the HTML |
 | `--no-compress` | keep the page's data as plain JSON (by default, big pages store it gzipped, about 4× smaller) |
 | `--open` | open the result in your browser |
 
 In a git work tree, files ignored by `.gitignore` are skipped and checked-out submodules are included.
+
+### Reviewing a branch
+
+`codeviz . --changed-since main` marks every function the branch adds (green) or modifies (amber), measured from where the branch left `main` and including uncommitted edits. Dots in the explorer lead to them, changed nodes carry a dot in the graph, and the overview lists them ranked by how many functions can reach them, so you can see what a change can affect.
 
 ## Languages
 

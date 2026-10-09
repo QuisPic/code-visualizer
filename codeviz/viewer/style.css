@@ -118,6 +118,13 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height:
 .cx.mid { color: var(--warn); }
 .cx.high { color: var(--k-ctor); font-weight: 600; }
 .badge.cx.mid, .badge.cx.high { background: none; border: 1px solid currentColor; }
+.ch-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); flex: none; margin-left: 4px; }
+.ch-dot.new { background: var(--tok-str); }
+.explorer .ch-dot { margin: 0 8px 0 auto; }
+.ch-tag { color: var(--warn); font-weight: 600; }
+.ch-tag.new { color: var(--tok-str); }
+.ch-mark { fill: var(--warn); }
+.ch-mark.new { fill: var(--tok-str); }
 .fn-body { flex: 1; display: flex; min-height: 0; }
 .panel { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .panel.tree-panel { width: var(--tree-w); min-width: 220px; }
