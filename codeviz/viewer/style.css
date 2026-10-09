@@ -379,3 +379,14 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height:
 .search-results .label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row.flash { animation: flash 1.2s ease-out; }
 @keyframes flash { from { background: var(--accent); } to { background: var(--accent-bg); } }
+
+/* code search */
+.grep-group { margin: 14px 0 0; }
+.grep-group > .row { padding: 3px 4px; }
+.grep-line { display: flex; gap: 10px; font: 12px/1.6 var(--mono); padding: 0 6px 0 22px; cursor: pointer; border-radius: 4px; white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+.grep-line:hover { background: var(--hover); }
+.grep-line .ln-no { color: var(--muted); min-width: 4ch; text-align: right; flex: none; }
+.grep-line code { font: inherit; overflow: hidden; text-overflow: ellipsis; }
+.grep-line mark { background: var(--accent-bg); color: inherit; outline: 1px solid var(--accent); border-radius: 2px; }
+.grep h1 code { font: inherit; font-family: var(--mono); color: var(--accent); }
+.search-results li.grep-item { border-top: 1px solid var(--border); margin-top: 2px; color: var(--muted); }

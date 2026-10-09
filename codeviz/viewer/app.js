@@ -1436,6 +1436,8 @@
     renderTree();
     revealInExplorer(f);
     visit(id);
+    if (jumpTo && jumpTo.id === id) highlightLines(codeBox, [jumpTo.line], true);
+    jumpTo = null;
   }
 
   function cycleSection() {
@@ -1600,6 +1602,82 @@
         el("span", { class: "back-key" }, "Amber"), " cells left of it are calls back up the order: folders that depend on each other. " +
         (back ? back + " call" + (back === 1 ? "" : "s") + " go that way here." : "There are none here.") + " Click a cell to see the calls; guesses count, ambiguous links don't."),
       el("div", { class: "dsm-wrap" }, table), detail));
+  }
+
+  // ---------------------------------------------------------------- code search (#/grep/<query>)
+  let jumpTo = null; // {id, line}: a line to highlight once the function opens
+  const GREP_MAX = 500;
+  // /regex/ or plain text (case-insensitive); returns a global RegExp or null when the regex is invalid
+  function grepRe(q) {
+    const m = /^\/(.+)\/([a-z]*)$/.exec(q);
+    try { return m ? new RegExp(m[1], m[2].replace("g", "") + "g") : new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"); }
+    catch { return null; }
+  }
+  function grep(re) {
+    // each matching line is attributed to the innermost function containing it
+    const best = new Map(); // "file:line" -> {f, line, text, ranges}
+    for (const f of FUNCS) {
+      if (!f.code) continue;
+      const lines = f.code.split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        const text = lines[i], ranges = [];
+        re.lastIndex = 0;
+        let m;
+        while ((m = re.exec(text))) {
+          if (!m[0]) { re.lastIndex++; continue; }
+          ranges.push([m.index, m.index + m[0].length]);
+        }
+        if (!ranges.length) continue;
+        const key = f.f + ":" + (f.l + i), prev = best.get(key);
+        if (!prev || f.e - f.l < prev.f.e - prev.f.l) best.set(key, { f, line: f.l + i, text, ranges });
+      }
+    }
+    return [...best.values()].sort((a, b) => fileOf(a.f).localeCompare(fileOf(b.f)) || a.line - b.line);
+  }
+  function grepLine(hit) {
+    const fam = FAMILY[FILES[hit.f.f].lang] || "c";
+    const text = hit.text.length > 400 ? hit.text.slice(0, 400) + "…" : hit.text;
+    const cls = highlight(text, fam);
+    const inMatch = new Uint8Array(text.length);
+    for (const [a, b] of hit.ranges) inMatch.fill(1, a, Math.min(b, text.length));
+    const code = el("code", null);
+    let i = 0;
+    const lead = text.length - text.trimStart().length; // drop indentation
+    i = lead;
+    while (i < text.length) {
+      let j = i + 1;
+      while (j < text.length && cls[j] === cls[i] && inMatch[j] === inMatch[i]) j++;
+      const span = el(inMatch[i] ? "mark" : "span", cls[i] ? { class: CLS[cls[i]] } : null, text.slice(i, j));
+      code.append(span);
+      i = j;
+    }
+    return el("div", { class: "grep-line", onclick: () => { jumpTo = { id: hit.f.id, line: hit.line }; go(hit.f.id); } },
+      el("span", { class: "ln-no" }, String(hit.line)), code);
+  }
+  function showGrep(q) {
+    document.title = "“" + q + "” · " + DATA.name;
+    main.textContent = "";
+    if (search.value !== q) search.value = q;
+    const re = grepRe(q);
+    const hits = re ? grep(re) : [];
+    const box = el("div", { class: "overview grep" },
+      el("h1", null, "Code matching ", el("code", null, q)),
+      el("div", { class: "muted" }, !re ? "Not a valid regular expression." :
+        hits.length.toLocaleString() + " line" + (hits.length === 1 ? "" : "s") + (hits.length > GREP_MAX ? ", showing the first " + GREP_MAX : "") +
+        " · plain text ignores case; wrap the query in /…/ for a regular expression"));
+    let lastFn = null, group = null;
+    for (const hit of hits.slice(0, GREP_MAX)) {
+      if (hit.f !== lastFn) {
+        lastFn = hit.f;
+        const f = hit.f;
+        group = el("div", { class: "grep-group" },
+          el("div", { class: "row", onclick: () => go(f.id) }, el("span", { class: "icon " + f.k }, KIND_LETTER[f.k]), fnLabel(f),
+            el("span", { class: "meta" }, fileOf(f) + ":" + f.l)));
+        box.append(group);
+      }
+      group.append(grepLine(hit));
+    }
+    main.append(box);
   }
 
   function showOverview() {
@@ -1995,12 +2073,14 @@
   }
   function route() {
     hidePopup(); hideCard();
+    const g = /^#\/grep\/(.+)/.exec(location.hash);
     const m = /^#\/f\/(\d+)(?:\/(in|both|impact))?/.exec(location.hash);
     const deps = /^#\/deps(?:\/(\d+))?/.exec(location.hash);
     const p = /^#\/path\/(\d*)\/(\d*)/.exec(location.hash);
     if (m) showFunction(+m[1], m[2] || "out");
     else if (p) showPath(p[1] === "" ? null : +p[1], p[2] === "" ? null : +p[2]);
     else if (deps) showDeps(deps[1] ? +deps[1] : 0);
+    else if (g) showGrep(decodeURIComponent(g[1]));
     else showOverview();
     main.scrollTop = 0;
   }
@@ -2132,8 +2212,11 @@
     const first = results.querySelector("li.opt");
     if (first) first.classList.add("active");
     if (!shown.length) results.append(el("li", { class: "muted" }, "Nothing matches"));
+    results.append(el("li", { class: "grep-item", title: "Shift+Enter", onmousedown: (e) => { e.preventDefault(); grepFor(search.value.trim()); } },
+      el("span", { class: "icon" }, "⌕"), el("span", null, "Search code for “" + search.value.trim() + "”"), el("span", { class: "path" }, "Shift+Enter")));
     results.hidden = false;
   }
+  function grepFor(q) { if (!q) return; results.hidden = true; search.blur(); location.hash = "#/grep/" + encodeURIComponent(q); }
   function pick(i) {
     const it = shown[i];
     if (!it) return;
@@ -2151,7 +2234,7 @@
       active = (active + (e.key === "ArrowDown" ? 1 : -1) + shown.length) % shown.length;
       items.forEach((li, i) => li.classList.toggle("active", i === active));
       items[active].scrollIntoView({ block: "nearest" });
-    } else if (e.key === "Enter") { pick(active); }
+    } else if (e.key === "Enter") { if (e.shiftKey || !shown.length) grepFor(search.value.trim()); else pick(active); }
     else if (e.key === "Escape") { search.value = ""; results.hidden = true; search.blur(); }
   });
   document.addEventListener("keydown", (e) => {

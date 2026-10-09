@@ -41,6 +41,9 @@ Open the generated `<name>-codeviz.html` in a browser. No server, no internet ne
   after you regenerate the page.
 - **Call sites**: switch the source pane to *Call sites* to see every line that calls the function, with a
   line of context on each side and the call highlighted, grouped by caller. Click one to open that caller.
+- **Code search**: in the search box, press `Shift+Enter` (or pick *Search code for…*) to list every line
+  of function code that contains the text, grouped by function, with the match highlighted. Wrap the
+  query in `/…/` for a regular expression. Click a line to open the function at that line.
 - **Search** (`/` or `Ctrl+K`): fuzzy, like an editor's file finder: `gms` finds `getMaterialState`,
   several words narrow it down (`surface flat`), and file names are listed too (picking one opens it in
   the Explorer).
