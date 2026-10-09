@@ -32,7 +32,10 @@ Open the generated `<name>-codeviz.html` in a browser. No server, no internet ne
   functions and see the shortest chains of calls from one to the other, step by step, with the call
   on each step highlighted in the source.
 - **Search** (`/`), back/forward (`Alt+←/→` or the browser buttons; every view has its own URL),
-  light/dark theme, and an overview page listing entry points and the most-called functions.
+  light/dark theme, and an overview page with a **codebase map** (a treemap of folders and files sized by
+  lines, coloured by language or by how much other files call into them; click a folder to zoom in, a file
+  to list its functions), entry points, the most-called functions, **call cycles** (groups of mutually
+  recursive functions) and **isolated functions** (not called and calling nothing: dead-code candidates).
 
 ## Install
 
