@@ -128,8 +128,11 @@ In the page:
 - **amber** links have several equally likely targets and let you pick one,
 - calls to things outside the codebase (std library, npm packages, …) are hidden unless you tick *external*.
 
-Calls through function pointers, callbacks, virtual dispatch and dynamic dispatch can't be
-resolved statically, so a function reached only that way shows up with no callers.
+A function passed by name as an argument (`app.use(loadUser)`, `setTimeout(tick)`, `Thread(target=run)`,
+`map(this.format)`) is linked as a **callback** (dotted line) when the name surely means that function: a free
+function or a method of the same class, and not a variable or parameter anywhere in the file. Other calls
+through function pointers, stored callbacks, virtual dispatch and dynamic dispatch can't be resolved
+statically, so a function reached only that way shows up with no callers.
 
 ## Development
 

@@ -239,6 +239,12 @@ def build(root: Path, name: str, excludes: list[str], quiet: bool = False, chang
         calls = []
         for call in fn.calls:
             targets, conf = resolver.resolve(fn, call)
+            if call.ref:
+                if targets:  # callbacks are only kept when they link somewhere
+                    calls.append({"n": call.name, "l": call.line, "c": call.col, "t": targets, "x": conf[0], "r": 1,
+                                  **({"q": call.qualifier} if call.qualifier else {})})
+                    counts["refs"] = counts.get("refs", 0) + 1
+                continue
             counts["calls"] += 1
             counts["resolved" if targets else "external"] += 1
             entry = {"n": call.name, "l": call.line, "c": call.col}

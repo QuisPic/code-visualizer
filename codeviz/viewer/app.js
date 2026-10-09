@@ -28,7 +28,7 @@
   const qname = (f) => (f.s ? f.s + sep(f) + f.n : f.n);
   const fileOf = (f) => FILES[f.f].p;
   const callers = FUNCS.map(() => []); // id -> [{from, line}]
-  for (const f of FUNCS) for (const c of f.calls) if (c.t) for (const t of c.t) callers[t].push({ from: f.id, line: c.l });
+  for (const f of FUNCS) for (const c of f.calls) if (c.t) for (const t of c.t) callers[t].push({ from: f.id, line: c.l, ref: !!c.r });
   // Test code: files under a test directory or named like a test (test_x.py, x_test.go, x.spec.ts, FooTest.java).
   const TEST_DIR = /(^|\/)(tests?|__tests__|spec|specs|testing|testdata|e2e)\//i;
   const TEST_FILE = /(^|\/)(test_[^/]*\.py|[^/]*_test\.\w+|[^/]*\.(test|spec)\.\w+|[^/]*Tests?\.(java|kt|cs|swift)|conftest\.py)$/;
@@ -72,10 +72,11 @@
       } else {
         if (c.x === "l" && !prefs.low) continue;
         key = "f:" + c.t[0];
-        item = { type: "fn", id: c.t[0], low: c.x === "l" };
+        item = { type: "fn", id: c.t[0], low: c.x === "l", ref: !!c.r }; // ref: passed as a callback, not called
       }
       const g = groups.get(key);
-      if (g) { g.lines.push(c.l); if (item.low === false) g.low = false; } else groups.set(key, Object.assign(item, { lines: [c.l] }));
+      if (g) { g.lines.push(c.l); if (item.low === false) g.low = false; if (!c.r) g.ref = false; }
+      else groups.set(key, Object.assign(item, { lines: [c.l] }));
     }
     return [...groups.values()];
   }
@@ -84,7 +85,8 @@
     for (const c of callers[f.id]) {
       if (hidden(c.from)) continue;
       const g = groups.get(c.from);
-      if (g) g.lines.push(c.line); else groups.set(c.from, { type: "fn", id: c.from, lines: [c.line] });
+      if (g) { g.lines.push(c.line); if (!c.ref) g.ref = false; }
+      else groups.set(c.from, { type: "fn", id: c.from, lines: [c.line], ref: c.ref });
     }
     return [...groups.values()].sort((a, b) => fileOf(FUNCS[a.id]).localeCompare(fileOf(FUNCS[b.id])) || FUNCS[a.id].l - FUNCS[b.id].l);
   }
@@ -468,6 +470,7 @@
       row.append(el("span", { class: "icon " + f.k }, KIND_LETTER[f.k]), fnLabel(f));
       if (item.lines.length > 1) row.append(el("span", { class: "badge", title: "called on lines " + item.lines.join(", ") }, "×" + item.lines.length));
       if (item.low) { row.classList.add("low"); row.append(el("span", { class: "badge low", title: "Best guess: resolved by name only" }, "guess")); }
+      if (item.ref) row.append(el("span", { class: "badge ref", title: "Passed by name as an argument (a callback), not called directly here" }, "callback"));
       if (cycle) row.append(el("span", { class: "badge cycle", title: "Already shown above in this branch" }, "↻ recursive"));
       row.append(el("span", { class: "meta" }, fileOf(f) + ":" + f.l));
       if (depth > 0) row.append(el("span", { class: "go" }, "open ↗"));
@@ -702,7 +705,7 @@
       for (const { n } of positions.values()) {
         n.edge = n.edgeLabel = null;
         if (!n.parent) continue;
-        const cls = "edge" + (n.kind === "ext" ? " ext" : "") + (n.item.low ? " low" : "") + (n.kind === "amb" ? " amb" : "");
+        const cls = "edge" + (n.kind === "ext" ? " ext" : "") + (n.item.low ? " low" : "") + (n.item.ref ? " ref" : "") + (n.kind === "amb" ? " amb" : "");
         n.edge = svg("path", { class: cls });
         edgeLayer.append(n.edge);
         if (n.item.lines && n.item.lines.length > 1) {
@@ -730,7 +733,8 @@
                      n.expandable ? (n.open ? "− to collapse" : "+ to expand (shift: 3 levels)") : null, "drag to move"].filter(Boolean).join(" · ");
         g.setAttribute("data-hc", isFn ? String(n.item.id) : n.kind === "amb" ? "a:" + n.item.targets.join(",")
           : "x:" + n.label.replace(/\(\)$/, ""));
-        g.setAttribute("data-hc-hint", how[0].toUpperCase() + how.slice(1));
+        const refNote = n.item.ref ? (dir === "out" ? "Passed as a callback here, not called directly. " : "Passes this function as a callback. ") : "";
+        g.setAttribute("data-hc-hint", refNote + how[0].toUpperCase() + how.slice(1));
         if (n.expandable) {
           const tx = n.side === "in" ? 2 : n.w - 2;
           // collapsed: a pill saying how many calls are hidden behind the node; open: a "−" circle
