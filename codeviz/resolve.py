@@ -57,6 +57,16 @@ class Resolver:
             receiver = last.lower().removeprefix("m_").removeprefix("_").replace("_", "")
             if cand.scope and last in cand.scope:
                 score += 80
+                # compare the rest of the qualifier with the scope around that name, right to left:
+                # `a::legacy::f` fully matches scope [x, a, legacy] but contradicts [x, b, legacy]
+                end = len(cand.scope) - 1 - cand.scope[::-1].index(last)
+                outer_q, outer_s = q_parts[:-1][::-1], cand.scope[:end][::-1]
+                if outer_q and all(a == b for a, b in zip(outer_q, outer_s)) and len(outer_s) >= len(outer_q):
+                    score += 40
+                elif any(a != b for a, b in zip(outer_q, outer_s)):
+                    score -= 40
+                if end != len(cand.scope) - 1:
+                    score -= 30  # the candidate sits in a nested scope the call doesn't name
             elif last and last in (cand_path.stem, cand_path.parent.name):
                 score += 60  # module.func() / package.Func()
             elif call.sep == "::":
