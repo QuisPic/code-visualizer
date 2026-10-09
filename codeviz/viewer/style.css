@@ -251,3 +251,16 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height:
 .lg-stripe.method { background: var(--k-method); } .lg-stripe.constructor { background: var(--k-ctor); } .lg-stripe.toplevel { background: var(--k-top); }
 .lg-pill { font: 700 10px/14px var(--sans); color: var(--accent); border: 1.4px solid var(--accent); border-radius: 8px; padding: 0 5px; }
 .lg-text { font: 11px var(--sans); color: var(--fg); }
+/* impact view */
+.impact { padding: 10px 12px 30px; }
+.impact-summary { background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px; margin-bottom: 12px; line-height: 1.6; }
+.impact-summary b { font-weight: 600; }
+.impact-summary .muted { font-size: 12px; }
+.impact-group + .impact-group { margin-top: 8px; }
+.impact-head { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--muted); cursor: pointer; padding: 3px 0; user-select: none; }
+.impact-list .row .label { font-family: var(--mono); font-size: 12px; }
+.impact-list .row.low .label { text-decoration: underline dashed var(--muted); text-underline-offset: 3px; }
+.impact-list .via { color: var(--muted); font: 11px var(--mono); flex: none; }
+.impact-list .more { padding: 2px 26px; }
+.badge.entry { background: none; color: var(--accent); border: 1px solid var(--accent); }
