@@ -142,6 +142,8 @@ def build(root: Path, name: str, excludes: list[str], quiet: bool = False) -> di
         }
         if fn.doc:
             record["d"] = fn.doc
+        if fn.complexity > 1:
+            record["cx"] = fn.complexity
         out_funcs.append(record)
     data = {
         "name": name,

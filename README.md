@@ -41,9 +41,13 @@ Open the generated `<name>-codeviz.html` in a browser. No server, no internet ne
   several words narrow it down (`surface flat`), and file names are listed too (picking one opens it in
   the Explorer).
 - Back/forward (`Alt+←/→` or the browser buttons; every view has its own URL), light/dark theme,
-  and an overview page with a **codebase map** (a treemap of folders and files sized by lines, coloured by language or by how much other files call into them; click a folder to zoom in, a file
+  and an overview page with a **codebase map** (a treemap of folders and files sized by lines,
+  coloured by language or by how much other files call into them; click a folder to zoom in, a file
   to list its functions), entry points, the most-called functions, **call cycles** (groups of mutually
   recursive functions) and **isolated functions** (not called and calling nothing: dead-code candidates).
+- **Complexity**: each function's cyclomatic complexity (1 + every `if`, loop, `case`, `catch`, `&&`
+  and `||`) is shown in its header, amber above 10 and red above 20, and the overview lists the most
+  complex functions.
 
 ## Install
 

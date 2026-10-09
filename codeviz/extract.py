@@ -18,6 +18,22 @@ _NAME_TYPES = ("simple_identifier", "type_identifier", "identifier")
 # declarations whose name is a keyword rather than an identifier
 _FIXED_NAMES = {"init_declaration": "init", "deinit_declaration": "deinit", "secondary_constructor": "constructor"}
 
+# decision points for cyclomatic complexity, across all supported grammars
+_BRANCHES = frozenset({
+    "if_statement", "if_expression", "if", "elif_clause", "else_if_clause", "elsif", "elseif_statement",
+    "if_modifier", "unless", "unless_modifier", "if_clause", "guard_statement",
+    "for_statement", "for_in_statement", "for_range_loop", "enhanced_for_statement", "foreach_statement",
+    "for_expression", "for", "while_statement", "while_expression", "while", "while_modifier", "until",
+    "until_modifier", "do_statement", "loop_expression", "repeat_statement",
+    "case_statement", "switch_case", "switch_label", "switch_section", "case_clause", "expression_case",
+    "type_case", "communication_case", "match_arm", "when", "when_entry", "switch_entry",
+    "catch_clause", "except_clause", "rescue", "rescue_modifier", "catch_block",
+    "conditional_expression", "ternary_expression", "conditional", "boolean_operator",
+    "conjunction_expression", "disjunction_expression",
+})
+_DEFAULT_CASE = re.compile(rb"\s*(default|else)\b")
+_LOGICAL = frozenset({"&&", "||", "and", "or"})
+
 
 @dataclass
 class Call:
@@ -42,6 +58,7 @@ class Function:
     calls: list[Call] = field(default_factory=list)
     receiver: str | None = None  # Go receiver variable, e.g. `s` in `func (s *Server) Start()`
     doc: str = ""  # comment right above the definition, or a Python docstring
+    complexity: int = 1  # cyclomatic: 1 + branches, loops, cases, catches and && / ||
 
 
 @dataclass
@@ -393,6 +410,13 @@ class _Extractor:
                 if call is not None:
                     owner = func or self._toplevel()
                     owner.calls.append(call)
+            elif func is not None:
+                if t in _BRANCHES:
+                    if not (t in ("case_statement", "switch_label", "switch_entry", "when_entry", "match_arm")
+                            and _DEFAULT_CASE.match(node.text)):
+                        func.complexity += 1
+                elif t in ("binary_expression", "binary") and _text(node.child_by_field_name("operator")) in _LOGICAL:
+                    func.complexity += 1
 
             for child in reversed(node.children):
                 if child.is_named:

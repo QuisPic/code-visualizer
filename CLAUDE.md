@@ -33,7 +33,8 @@ There is no linter, formatter config, JS build step or CI. Generated `*-codeviz.
 
 Keys are deliberately short to keep pages small. `files[]`: `{p: path, lang, lines}`.
 `funcs[]` (index = id): `{id, n: name, s: scope ("::"-joined for c/rust/php, else "."),
-f: file index, l/e: start/end line, k: kind, code, d?: doc comment / docstring, calls[]}`. Each call:
+f: file index, l/e: start/end line, k: kind, code, d?: doc comment / docstring, cx?: cyclomatic
+complexity (omitted when 1), calls[]}`. Each call:
 `{n: name, l: line, c: column, q?: qualifier, t?: [target ids], x?: "h"|"l"|"a"}`. A call with
 no `t` is external. `stats` holds counts. Changing a key means changing `project.py`,
 `viewer/app.js` and the tests together.

@@ -115,6 +115,9 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height:
 .fn-title .scope { color: var(--muted); font-weight: 400; }
 .fn-sub { margin-top: 4px; display: flex; gap: 14px; flex-wrap: wrap; color: var(--muted); font-size: 12px; }
 .fn-sub a { color: inherit; }
+.cx.mid { color: var(--warn); }
+.cx.high { color: var(--k-ctor); font-weight: 600; }
+.badge.cx.mid, .badge.cx.high { background: none; border: 1px solid currentColor; }
 .fn-body { flex: 1; display: flex; min-height: 0; }
 .panel { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .panel.tree-panel { width: var(--tree-w); min-width: 220px; }

@@ -1142,6 +1142,16 @@
   }
   renderPins();
 
+  // ---------------------------------------------------------------- complexity
+  // cyclomatic complexity: 1 + each if / loop / case / catch / && / ||, counted at extraction
+  const cx = (f) => f.cx || 1;
+  const cxLevel = (n) => (n > 20 ? "high" : n > 10 ? "mid" : "");
+  function complexityTag(f) {
+    const n = cx(f);
+    return el("span", { class: "cx " + cxLevel(n), title: "Cyclomatic complexity: 1 + every if, loop, case, catch, && and ||. " +
+      "Above 10 is harder to test, above 20 is a good candidate for splitting up." }, "complexity " + n);
+  }
+
   // ---------------------------------------------------------------- views
   const main = $("#main");
   function showFunction(id, dir) {
@@ -1158,6 +1168,7 @@
         el("span", null, f.k),
         el("span", null, "calls " + nCallees + " function" + (nCallees === 1 ? "" : "s") + (nExt ? " (+" + nExt + " external)" : "")),
         el("span", null, "called from " + callers[id].length + " place" + (callers[id].length === 1 ? "" : "s")),
+        f.k === "toplevel" ? null : complexityTag(f),
         el("a", { href: "#/path/" + id + "/", title: "Find the chains of calls from this function to another one" }, "find path to…"))));
 
     const body = el("div", { class: "fn-body" });
@@ -1321,11 +1332,21 @@
       .map((f) => ({ f, n: reach(f.id) })).sort((a, b) => b.n - a.n).slice(0, 30);
     const popular = real.map((f) => ({ f, n: new Set(callers[f.id].map((c) => c.from)).size }))
       .filter((x) => x.n > 1).sort((a, b) => b.n - a.n).slice(0, 30);
-    const list = (items, metaFn) => {
+    // copy-pasted helpers (the same function in many files) are listed once
+    const copies = new Map();
+    for (const f of real) {
+      if (cx(f) <= 10) continue;
+      const key = f.n + "\0" + f.code;
+      const seen = copies.get(key);
+      if (seen) seen.copies++; else copies.set(key, { f, n: cx(f), copies: 1 });
+    }
+    const complex = [...copies.values()].sort((a, b) => b.n - a.n || (b.f.e - b.f.l) - (a.f.e - a.f.l)).slice(0, 30);
+    const list = (items, metaFn, clsFn) => {
       const ul = el("ul", { class: "tree fn-list" });
-      for (const { f, n } of items) {
+      for (const { f, n, copies } of items) {
         const li = fnRow(f, () => go(f.id), false);
-        li.firstChild.append(el("span", { class: "badge" }, metaFn(n)), el("span", { class: "meta" }, fileOf(f)));
+        li.firstChild.append(el("span", { class: "badge " + (clsFn ? clsFn(n) : "") }, metaFn(n)),
+          el("span", { class: "meta" }, fileOf(f) + (copies > 1 ? "  +" + (copies - 1) + " identical cop" + (copies > 2 ? "ies" : "y") : "")));
         ul.append(li);
       }
       return ul;
@@ -1348,6 +1369,9 @@
       entries.length ? list(entries, (n) => n + " reachable") : null,
       popular.length ? el("h2", null, "Most called") : null,
       popular.length ? list(popular, (n) => n + " callers") : null,
+      complex.length ? el("h2", { title: "Cyclomatic complexity: 1 + every if, loop, case, catch, && and ||" },
+        "Most complex (" + real.filter((f) => cx(f) > 10).length.toLocaleString() + " above 10)") : null,
+      complex.length ? list(complex, (n) => "complexity " + n, (n) => "cx " + cxLevel(n)) : null,
       cycleSection(), neverCalledSection()));
   }
 
