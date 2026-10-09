@@ -17,7 +17,8 @@ Open the generated `<name>-codeviz.html` in a browser. No server, no internet ne
   it calls. Click a node to see its code on the right, expand it with **+** to follow its calls as
   deep as you like, double-click it to open that function, drag nodes to rearrange them (a node's subtree moves with it; **Tidy** puts
   them back), drag the background to pan, scroll to zoom. Switch to **Callers** to grow the graph the other
-  way, or to **List** for an indented-tree view. Recursion is marked instead of expanding forever.
+  way, or to **List** for an indented-tree view. Recursion is marked instead of expanding forever. A collapsed node shows how many calls are behind it
+  (**+5**); shift-click it to open three levels at once. **?** shows a legend for the colours and line styles.
 - **Source** (right): the function's code with syntax highlighting. Every call that leads to a
   function in the codebase is a link. Hovering a node in the graph highlights where that call happens.
 - **Hover cards**: rest the pointer on a call in the source, a graph node or a function in a list to
