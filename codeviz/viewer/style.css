@@ -392,3 +392,17 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height:
 .grep-line mark { background: var(--accent-bg); color: inherit; outline: 1px solid var(--accent); border-radius: 2px; }
 .grep h1 code { font: inherit; font-family: var(--mono); color: var(--accent); }
 .search-results li.grep-item { border-top: 1px solid var(--border); margin-top: 2px; color: var(--muted); }
+/* class view */
+.cls h1 .icon { vertical-align: 3px; }
+.cls-cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; align-items: start; }
+@media (max-width: 1100px) { .cls-cols { grid-template-columns: 1fr; } }
+.cls-groups details { border-bottom: 1px solid var(--border); }
+.cls-groups summary { display: flex; align-items: center; gap: 6px; padding: 4px 2px; cursor: pointer; list-style: none; min-width: 0; }
+.cls-groups summary::-webkit-details-marker { display: none; }
+.cls-groups summary::before { content: "▸"; color: var(--muted); font-size: 10px; width: 10px; transition: transform .1s; }
+.cls-groups details[open] summary::before { transform: rotate(90deg); }
+.cls-groups summary .label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; max-width: 60%; }
+.cls-groups summary .meta { white-space: nowrap; flex: 1 1 0; }
+.cls-groups summary .badge { white-space: nowrap; }
+.cls-groups .cls-open { font-size: 11px; color: var(--accent); text-decoration: none; flex: none; }
+.cls-groups ul { margin: 0 0 6px 14px; }

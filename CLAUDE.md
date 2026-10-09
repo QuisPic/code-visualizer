@@ -47,7 +47,8 @@ no `t` is external. `stats` holds counts. Optional top-level `link` is a URL tem
   viewer. New viewer files must be inlined by `render.py` and covered by
   `[tool.setuptools.package-data]`.
 - Viewer state lives in the URL hash (`#/`, `#/f/<id>`, `#/f/<id>/in` for callers, `#/f/<id>/both`,
-  `#/f/<id>/impact`, `#/path/<from>/<to>`, `#/deps/<depth>`) so back/forward works; user prefs persist in
+  `#/f/<id>/impact`, `#/path/<from>/<to>`, `#/deps/<depth>`,
+  `#/class/<file index>/<scope>`) so back/forward works; user prefs persist in
   `localStorage["codeviz-prefs"]`, bookmarks and recent functions in `localStorage["codeviz-pins:<project>"]`
   as `file|qualified name|line` keys, since ids change between runs (wrap access in try/catch).
 - Adding a language: add a `Language` to `languages.py` (node type names come from that
