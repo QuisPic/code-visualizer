@@ -30,7 +30,7 @@ def main(argv: list[str] | None = None) -> int:
                     help="keep the data as plain JSON in the page even when it is big (larger file)")
     ap.add_argument("--open", action="store_true", help="open the result in a browser")
     ap.add_argument("--link", metavar="TEMPLATE",
-                    help="URL for 'open in browser' links, with {path}, {line} and {end} "
+                    help="URL for 'open in browser' links, with {path}, {line}, {end} and {root} "
                          "(default: the git remote's GitHub/GitLab/Bitbucket page for the scanned commit)")
     ap.add_argument("--no-link", action="store_true", help="don't add links to the repository's web page")
     ap.add_argument("-q", "--quiet", action="store_true")
@@ -41,6 +41,8 @@ def main(argv: list[str] | None = None) -> int:
                          else Path(args.source).expanduser().resolve().name)
     with checkout(args.source, args.ref) as root:
         link = None if args.no_link else args.link or source_link(root)
+        if link:
+            link = link.replace("{root}", root.as_posix())  # e.g. vscode://file{root}/{path}:{line}
         data = build(root, name, excludes, quiet=args.quiet, changed_since=args.changed_since,
                      link=link)
 

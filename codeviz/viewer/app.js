@@ -37,7 +37,7 @@
   const isTest = (id) => testFile[FUNCS[id].f];
   const byFile = FILES.map(() => []);
   // DATA.link: URL template for the repository's web page ({path}, {line}, {end}), set by the CLI
-  const LINK_HOST = DATA.link ? (/^https?:\/\/([^/]+)/.exec(DATA.link) || [, "source"])[1] : null;
+  const LINK_HOST = DATA.link ? (/^https?:\/\/([^/]+)/.exec(DATA.link) || /^([\w+.-]+):/.exec(DATA.link) || [, "source"])[1] : null;
   const webLink = (f) => DATA.link.replace("{path}", fileOf(f).split("/").map(encodeURIComponent).join("/"))
     .replace("{line}", f.l).replace("{end}", Math.max(f.l, f.e));
   for (const f of FUNCS) byFile[f.f].push(f);
