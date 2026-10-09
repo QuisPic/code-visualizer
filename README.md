@@ -35,6 +35,8 @@ Open the generated `<name>-codeviz.html` in a browser. No server, no internet ne
 - **Bookmarks and recent**: star a function (☆ next to its name, or press `B`) to keep it at the top
   of the sidebar, under a list of recently visited functions. Both are remembered per project, even
   after you regenerate the page.
+- **Call sites**: switch the source pane to *Call sites* to see every line that calls the function, with a
+  line of context on each side and the call highlighted, grouped by caller. Click one to open that caller.
 - **Search** (`/`), back/forward (`Alt+←/→` or the browser buttons; every view has its own URL),
   light/dark theme, and an overview page with a **codebase map** (a treemap of folders and files sized by
   lines, coloured by language or by how much other files call into them; click a folder to zoom in, a file
