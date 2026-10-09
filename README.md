@@ -51,6 +51,9 @@ Open the generated `<name>-codeviz.html` in a browser. No server, no internet ne
 - **Complexity**: each function's cyclomatic complexity (1 + every `if`, loop, `case`, `catch`, `&&`
   and `||`) is shown in its header, amber above 10 and red above 20, and the overview lists the most
   complex functions.
+- **Folder dependencies** (link on the overview): a matrix of how many calls go from each folder
+  into each other folder, at a depth you pick. Folders are ordered callers-first, so amber cells
+  below the diagonal stand out as folders that depend on each other. Click a cell to list the calls.
 
 ## Install
 

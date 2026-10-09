@@ -1468,6 +1468,124 @@
     popup.style.top = (r.bottom + pr.height + 8 > innerHeight ? Math.max(8, r.top - pr.height - 4) : r.bottom + 4) + "px";
   }
 
+  // ---------------------------------------------------------------- folder dependencies (DSM)
+  // A dependency structure matrix: one row and column per folder, cell (r, c) = calls from code in
+  // folder r to functions in folder c. Folders are ordered callers-first, so calls normally land
+  // right of the diagonal; cells left of it are calls back "up" the order (cycles between folders).
+  const MAX_GROUPS = 40;
+  function folderOf(path, depth) {
+    const parts = path.split("/");
+    return parts.slice(0, Math.min(depth, parts.length - 1)).join("/") || "(root files)";
+  }
+  function showDeps(depth) {
+    document.title = "Folder dependencies · " + DATA.name;
+    main.textContent = "";
+    const maxDepth = Math.max(1, ...FILES.map((f) => f.p.split("/").length - 1));
+    if (!depth) { // the shallowest depth with a few folders to compare
+      depth = 1;
+      while (depth < Math.min(maxDepth, 4) && new Set(FILES.map((f) => folderOf(f.p, depth))).size < 6) depth++;
+    }
+    depth = Math.min(depth, maxDepth);
+    const groupOfFile = FILES.map((f) => folderOf(f.p, depth));
+    const size = new Map();
+    for (const f of FUNCS) if (f.k !== "toplevel") size.set(groupOfFile[f.f], (size.get(groupOfFile[f.f]) || 0) + 1);
+    let groups = [...size.keys()].sort((a, b) => size.get(b) - size.get(a));
+    const hidden = groups.length - MAX_GROUPS;
+    groups = groups.slice(0, MAX_GROUPS);
+    const gi = new Map(groups.map((g, i) => [g, i]));
+    const N = groups.length;
+    const count = Array.from({ length: N }, () => new Array(N).fill(0));
+    const samples = new Map(); // "r,c" -> [[from, to, line]]
+    for (const f of FUNCS) {
+      const r = gi.get(groupOfFile[f.f]);
+      if (r === undefined) continue;
+      for (const c of f.calls) {
+        if (!c.t || c.x === "a") continue; // ambiguous links would double count
+        for (const t of c.t) {
+          const col = gi.get(groupOfFile[FUNCS[t].f]);
+          if (col === undefined || col === r) continue;
+          count[r][col]++;
+          const k = r + "," + col;
+          if (!samples.has(k)) samples.set(k, []);
+          if (samples.get(k).length < 300) samples.get(k).push([f.id, t, c.l]);
+        }
+      }
+    }
+    // order: repeatedly take the folder that the remaining ones call least (callers first)
+    const left = new Set(groups.map((_, i) => i)), order = [];
+    while (left.size) {
+      let best = -1, bestIn = Infinity, bestOut = -1;
+      for (const i of left) {
+        let inc = 0, out = 0;
+        for (const j of left) if (j !== i) { inc += count[j][i]; out += count[i][j]; }
+        if (inc < bestIn || (inc === bestIn && out > bestOut)) { best = i; bestIn = inc; bestOut = out; }
+      }
+      order.push(best); left.delete(best);
+    }
+    const max = Math.max(1, ...count.flat());
+    let back = 0;
+    order.forEach((r, ri) => order.forEach((c, ci) => { if (ci < ri) back += count[r][c]; }));
+
+    const detail = el("div", { class: "deps-detail" });
+    const table = el("table", { class: "dsm" });
+    const head = el("tr", null, el("th", { class: "corner" }, "calls → into"));
+    order.forEach((g, i) => head.append(el("th", { class: "col", title: g }, String(i + 1))));
+    table.append(head);
+    let selected = null;
+    order.forEach((r, ri) => {
+      const tr = el("tr", null, el("th", { class: "row-h", title: groups[r] + " · " + size.get(groups[r]) + " functions" },
+        el("span", { class: "num" }, String(ri + 1)), el("span", { class: "name" }, groups[r])));
+      order.forEach((c, ci) => {
+        const n = count[r][c];
+        if (ri === ci) { tr.append(el("td", { class: "diag" })); return; }
+        const td = el("td", { class: n ? (ci < ri ? "back" : "fwd") : "" }, n ? String(n) : "");
+        if (n) {
+          td.style.setProperty("--a", (0.15 + 0.85 * Math.log(1 + n) / Math.log(1 + max)).toFixed(2));
+          td.title = groups[r] + " → " + groups[c] + ": " + n + " call" + (n === 1 ? "" : "s");
+          td.addEventListener("click", () => {
+            if (selected) selected.classList.remove("sel");
+            (selected = td).classList.add("sel");
+            showCalls(r, c);
+          });
+        }
+        tr.append(td);
+      });
+      table.append(tr);
+    });
+    function showCalls(r, c) {
+      detail.textContent = "";
+      const list = samples.get(r + "," + c) || [];
+      detail.append(el("h2", null, groups[r] + " → " + groups[c] + " · " + count[r][c] + " call" + (count[r][c] === 1 ? "" : "s")
+        + (count[r][c] > list.length ? " (first " + list.length + ")" : "")));
+      const ul = el("ul", { class: "tree fn-list" });
+      // group by callee so a function called from many places is one row
+      const byTarget = new Map();
+      for (const [from, to, line] of list) {
+        if (!byTarget.has(to)) byTarget.set(to, []);
+        byTarget.get(to).push([from, line]);
+      }
+      for (const [to, froms] of [...byTarget].sort((a, b) => b[1].length - a[1].length)) {
+        const li = fnRow(FUNCS[to], () => go(to, "in"), false);
+        const names = [...new Set(froms.map(([f]) => FUNCS[f].n + "()"))];
+        li.firstChild.append(el("span", { class: "badge" }, froms.length + "×"),
+          el("span", { class: "meta" }, "from " + names.slice(0, 4).join(", ") + (names.length > 4 ? " +" + (names.length - 4) : "")));
+        ul.append(li);
+      }
+      detail.append(ul);
+    }
+    const depthBtns = el("span", { class: "seg" });
+    for (let d = 1; d <= Math.min(maxDepth, 5); d++)
+      depthBtns.append(el("button", { class: d === depth ? "on" : null, onclick: () => (location.hash = "#/deps/" + d) }, String(d)));
+    main.append(el("div", { class: "overview deps" },
+      el("h1", null, "Folder dependencies"),
+      el("div", { class: "muted deps-sub" }, "Folder depth ", depthBtns, " · " + N + " folders"
+        + (hidden > 0 ? " (the " + hidden + " smallest are left out)" : "")),
+      el("p", { class: "help" }, "Each row is a folder and each number in it counts the calls from that folder into the folder of that column (column numbers match the row numbers). Folders are ordered so that callers come before the code they call, so most calls sit right of the diagonal. ",
+        el("span", { class: "back-key" }, "Amber"), " cells left of it are calls back up the order: folders that depend on each other. " +
+        (back ? back + " call" + (back === 1 ? "" : "s") + " go that way here." : "There are none here.") + " Click a cell to see the calls; guesses count, ambiguous links don't."),
+      el("div", { class: "dsm-wrap" }, table), detail));
+  }
+
   function showOverview() {
     document.title = DATA.name + " · codeviz";
     main.textContent = "";
@@ -1518,7 +1636,7 @@
       return ul;
     };
     main.append(el("div", { class: "overview" },
-      el("h1", null, DATA.name),
+      el("h1", null, DATA.name, el("a", { class: "h1-link", href: "#/deps" }, "Folder dependencies →")),
       el("div", { class: "muted" }, "Generated " + DATA.generated + " · " +
         Object.entries(langs).sort((a, b) => b[1] - a[1]).map(([l, n]) => n + " " + l).join(", ")),
       el("div", { class: "cards" }, card(s.files, "files"), card(s.functions, "functions"), card(s.calls, "call sites"),
@@ -1858,9 +1976,11 @@
   function route() {
     hidePopup(); hideCard();
     const m = /^#\/f\/(\d+)(?:\/(in|both|impact))?/.exec(location.hash);
+    const deps = /^#\/deps(?:\/(\d+))?/.exec(location.hash);
     const p = /^#\/path\/(\d*)\/(\d*)/.exec(location.hash);
     if (m) showFunction(+m[1], m[2] || "out");
     else if (p) showPath(p[1] === "" ? null : +p[1], p[2] === "" ? null : +p[2]);
+    else if (deps) showDeps(deps[1] ? +deps[1] : 0);
     else showOverview();
     main.scrollTop = 0;
   }
