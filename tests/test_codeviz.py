@@ -204,6 +204,8 @@ def test_typed_receivers(graph):
     assert linked(drive, drive["l"] + 1) == (["Engine.ignite"], "h")
     assert linked(drive, drive["l"] + 2) == (["Engine.ignite"], "h")
     assert linked(drive, drive["l"] + 4) == (["Engine.ignite"], "h")
+    service = find("service")
+    assert linked(service, service["l"] + 2) == (["Engine.ignite"], "h")
     ride = find("ride")
     assert linked(ride, ride["l"] + 1) == (["Gear.spin"], "h")
     assert linked(ride, ride["l"] + 2) == (["Wheel.spin"], "h")

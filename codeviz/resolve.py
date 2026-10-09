@@ -206,6 +206,10 @@ class Resolver:
                 typ = self.field_types.get(".".join(caller.scope), {}).get(q)
         else:
             return None
+        if typ and typ not in self.class_files:
+            # `x = make_foo()`: the type a factory function declares it returns (when every definition agrees)
+            returns = {self.functions[i].returns for i in self.by_name.get(typ, ())}
+            typ = returns.pop() if len(returns) == 1 else None
         if not typ or typ not in self.class_files:
             return None
         # only trust it when the class is visible from the caller (same file/dir, or imported), so a

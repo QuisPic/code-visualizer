@@ -60,6 +60,7 @@ class Function:
     doc: str = ""  # comment right above the definition, or a Python docstring
     complexity: int = 1  # cyclomatic: 1 + branches, loops, cases, catches and && / ||
     var_types: dict[str, str] = field(default_factory=dict)  # local/parameter name -> declared class name
+    returns: str | None = None  # declared return type's class name, e.g. `-> Foo`, `Foo* get()`
 
 
 @dataclass
@@ -531,6 +532,11 @@ class _Extractor:
                 parts = self._function_name(node)
                 if parts and all(parts):
                     child_func = self._new_function(node, parts, scope, in_class)
+                    ret = node.child_by_field_name("return_type") or node.child_by_field_name("result")
+                    if ret is None and lang.family in ("c", "java"):
+                        ret = node.child_by_field_name("type")
+                    if ret is not None:
+                        child_func.returns = _type_name(_text(ret))
                     if t == "method_declaration" and lang.name == "go":
                         child_func.receiver = self._go_receiver(node)
                     self.functions.append(child_func)
