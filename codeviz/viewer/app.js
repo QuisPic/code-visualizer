@@ -1349,6 +1349,8 @@
         el("span", null, "called from " + callers[id].length + " place" + (callers[id].length === 1 ? "" : "s")),
         f.k === "toplevel" ? null : complexityTag(f),
         f.ch ? el("span", { class: "ch-tag" + (f.ch === "n" ? " new" : "") }, chWord(f) + " since " + CHANGED.ref) : null,
+        DATA.churn ? el("span", { title: "Commits that touched " + fileOf(f) + " since " + DATA.churn.since },
+          "file changed in " + (FILES[f.f].cc || 0) + " commit" + (FILES[f.f].cc === 1 ? "" : "s")) : null,
         el("a", { href: "#/path/" + id + "/", title: "Find the chains of calls from this function to another one" }, "find path to…"))));
 
     const body = el("div", { class: "fn-body" });
@@ -1842,6 +1844,7 @@
         " include test code in these lists") : null,
       entries.length ? el("h2", null, "Entry points (not called from anywhere, ranked by how much they reach)") : null,
       entries.length ? list(entries, (n) => n + " reachable") : null,
+      DATA.churn ? hotspots() : null,
       popular.length ? el("h2", null, "Most called") : null,
       popular.length ? list(popular, (n) => n + " callers") : null,
       complex.length ? el("h2", { title: "Cyclomatic complexity: 1 + every if, loop, case, catch, && and ||" },
@@ -2154,6 +2157,38 @@
       listBox.append(el("section", { class: "chain-group" }, el("div", { class: "path-head" }, "Chain " + (pi + 1)), chain));
       if (pi === 0) select(chain.querySelector(".row"), path[0].id, path[0].lines);
     });
+  }
+
+  // Files that change often and hold a lot of code: where bugs and merge pain concentrate (CodeScene-style).
+  function hotspots() {
+    const codeLines = FILES.map(() => 0);
+    for (const f of FUNCS) if (f.k !== "toplevel") codeLines[f.f] += f.e - f.l + 1;
+    const rows = FILES.map((file, fi) => ({ fi, cc: file.cc || 0, loc: codeLines[fi] }))
+      .filter((r) => r.cc > 1 && r.loc > 0).map((r) => Object.assign(r, { score: r.cc * Math.log2(1 + r.loc) }))
+      .sort((a, b) => b.score - a.score).slice(0, 20);
+    const box = el("div", { class: "hotspots" });
+    box.append(el("h2", null, "Hotspots (changed most often since " + DATA.churn.since + ", weighted by size)"));
+    if (!rows.length) {
+      box.append(el("p", { class: "muted" }, DATA.churn.commits > 1 ? "No file changed more than once." :
+        "Not enough git history (a shallow clone, or not a git work tree)."));
+      return box;
+    }
+    const top = rows[0].score;
+    for (const r of rows) {
+      const fns = byFile[r.fi].filter((f) => f.k !== "toplevel").sort((a, b) => (b.e - b.l) - (a.e - a.l)).slice(0, 12);
+      const ul = el("ul", { class: "tree" });
+      for (const f of fns) {
+        const li = fnRow(f, () => go(f.id), false);
+        li.firstChild.append(el("span", { class: "meta" }, (f.e - f.l + 1) + " lines"));
+        ul.append(li);
+      }
+      box.append(el("details", null, el("summary", null,
+        el("span", { class: "hs-bar", style: "width:" + Math.max(4, Math.round(60 * r.score / top)) + "px" }),
+        el("span", { class: "label" }, FILES[r.fi].p),
+        el("span", { class: "badge" }, r.cc + " commits"),
+        el("span", { class: "meta" }, r.loc.toLocaleString() + " lines in functions")), ul));
+    }
+    return box;
   }
 
   // ---------------------------------------------------------------- routing
