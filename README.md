@@ -37,9 +37,11 @@ Open the generated `<name>-codeviz.html` in a browser. No server, no internet ne
   after you regenerate the page.
 - **Call sites**: switch the source pane to *Call sites* to see every line that calls the function, with a
   line of context on each side and the call highlighted, grouped by caller. Click one to open that caller.
-- **Search** (`/`), back/forward (`Alt+←/→` or the browser buttons; every view has its own URL),
-  light/dark theme, and an overview page with a **codebase map** (a treemap of folders and files sized by
-  lines, coloured by language or by how much other files call into them; click a folder to zoom in, a file
+- **Search** (`/` or `Ctrl+K`): fuzzy, like an editor's file finder: `gms` finds `getMaterialState`,
+  several words narrow it down (`surface flat`), and file names are listed too (picking one opens it in
+  the Explorer).
+- Back/forward (`Alt+←/→` or the browser buttons; every view has its own URL), light/dark theme,
+  and an overview page with a **codebase map** (a treemap of folders and files sized by lines, coloured by language or by how much other files call into them; click a folder to zoom in, a file
   to list its functions), entry points, the most-called functions, **call cycles** (groups of mutually
   recursive functions) and **isolated functions** (not called and calling nothing: dead-code candidates).
 

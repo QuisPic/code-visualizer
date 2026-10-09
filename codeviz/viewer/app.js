@@ -1666,39 +1666,144 @@
   window.addEventListener("hashchange", route);
 
   // ---------------------------------------------------------------- search
-  let searchIndex = null;
-  function findFunctions(query, limit) {
-    searchIndex ||= FUNCS.filter((f) => f.k !== "toplevel").map((f) => ({ f, n: f.n.toLowerCase(), q: qname(f).toLowerCase(), p: fileOf(f).toLowerCase() }));
-    const q = query.trim().toLowerCase();
-    const scored = [];
-    for (const it of searchIndex) {
-      let s = -1;
-      if (it.n === q) s = 100; else if (it.n.startsWith(q)) s = 80; else if (it.q === q || it.q.endsWith(q)) s = 75;
-      else if (it.n.includes(q)) s = 60; else if (it.q.includes(q)) s = 40; else if (it.p.includes(q)) s = 20;
-      if (s >= 0) scored.push([s - it.n.length * 0.01, it]);
+  // Fuzzy matching: every space-separated term must match the function's name, qualified name or
+  // file path, either as a substring or as an in-order subsequence ("gms" -> getMaterialState).
+  // Matches at word starts (after _ . : / - or a camelCase hump) and runs of consecutive characters
+  // score higher; the matched characters of the name are returned for highlighting.
+  function fuzzy(term, text) {
+    const lower = text.toLowerCase();
+    const at = lower.indexOf(term);
+    const boundary = (i) => i === 0 || /[_.:/\\\-\s]/.test(text[i - 1]) || (/[a-z0-9]/.test(text[i - 1]) && /[A-Z]/.test(text[i]));
+    if (at >= 0) {
+      const idx = [];
+      for (let i = 0; i < term.length; i++) idx.push(at + i);
+      return { score: 100 + (boundary(at) ? 40 : 0) + (at === 0 ? 30 : 0) + term.length * 4, idx };
     }
-    scored.sort((a, b) => b[0] - a[0]);
-    return scored.slice(0, limit).map((x) => x[1].f);
+    const idx = [];
+    const canMatch = (ti, from) => { // can term[ti..] still be matched in order from `from`?
+      for (let k = ti, i = from; k < term.length; k++, i++) if ((i = lower.indexOf(term[k], i)) < 0) return false;
+      return true;
+    };
+    let score = 0, ti = 0, prev = -2;
+    for (let i = 0; i < text.length && ti < term.length; i++) {
+      if (lower[i] !== term[ti]) continue;
+      // prefer a word start further on over a mid-word hit right here
+      if (!boundary(i) && prev !== i - 1) {
+        for (let j = i + 1; j < text.length; j++) if (lower[j] === term[ti] && boundary(j) && canMatch(ti + 1, j + 1)) { i = j; break; }
+      }
+      score += prev === i - 1 ? 6 : boundary(i) ? 8 : 1 - (prev >= 0 ? Math.min(i - prev - 1, 12) * 0.5 : 0);
+      idx.push(i); prev = i; ti++;
+    }
+    return ti === term.length ? { score, idx } : null;
   }
+  let searchIndex = null;
+  function findFunctions(query, limit) { return search2(query, limit).fns.map((m) => m.f); }
+  function search2(query, limit, fileLimit = 0) {
+    searchIndex ||= FUNCS.filter((f) => f.k !== "toplevel").map((f) => ({ f, q: qname(f), p: fileOf(f) }));
+    const terms = query.trim().split(/\s+/).filter(Boolean).map((t) => t.toLowerCase());
+    if (!terms.length) return { fns: [], files: [] };
+    const fns = [];
+    for (const it of searchIndex) {
+      let total = 0, idx = [];
+      for (const t of terms) {
+        const onName = fuzzy(t, it.f.n), onQ = onName ? null : fuzzy(t, it.q), onPath = onName || onQ ? null : fuzzy(t, it.p);
+        if (onName) {
+          total += onName.score * 3 + (it.f.n.toLowerCase() === t ? 400 : 0);
+          idx = idx.concat(onName.idx);
+        } else if (onQ) total += onQ.score * 2;
+        else if (onPath) total += onPath.score * 0.7;
+        else { total = -1; break; }
+      }
+      if (total >= 0) fns.push({ f: it.f, score: total - it.f.n.length * 0.5, idx });
+    }
+    fns.sort((a, b) => b.score - a.score);
+    const files = [];
+    if (fileLimit) {
+      FILES.forEach((file, fi) => {
+        let total = 0, idx = [];
+        for (const t of terms) {
+          const m = fuzzy(t, file.p);
+          if (!m) { total = -1; break; }
+          total += m.score; idx = idx.concat(m.idx);
+        }
+        if (total >= 0) files.push({ fi, score: total - file.p.length * 0.2 + (file.p.split("/").pop().toLowerCase().includes(terms[terms.length - 1]) ? 60 : 0), idx });
+      });
+      files.sort((a, b) => b.score - a.score);
+    }
+    return { fns: fns.slice(0, limit), files: files.slice(0, fileLimit) };
+  }
+  function marked(text, idx) { // text with the characters at idx wrapped in <mark>
+    const set = new Set(idx), out = el("span");
+    for (let i = 0; i < text.length;) {
+      let j = i + 1;
+      while (j < text.length && set.has(j) === set.has(i)) j++;
+      out.append(set.has(i) ? el("mark", null, text.slice(i, j)) : text.slice(i, j));
+      i = j;
+    }
+    return out;
+  }
+  function revealFile(fi) {
+    const parts = FILES[fi].p.split("/");
+    for (let i = 1; i < parts.length; i++) { const n = explorerNodes.get("d:" + parts.slice(0, i).join("/")); if (n) n.open(true); }
+    const n = explorerNodes.get("f:" + FILES[fi].p);
+    if (!n) return;
+    n.open(true);
+    for (const r of explorer.querySelectorAll(".row.selected")) r.classList.remove("selected");
+    n.row.classList.add("selected", "flash");
+    n.row.scrollIntoView({ block: "center" });
+    setTimeout(() => n.row.classList.remove("flash"), 1200);
+  }
+
   const search = $("#search"), results = $("#search-results");
   let active = 0, shown = [];
   function runSearch() {
     const q = search.value.trim();
     results.textContent = "";
     if (!q) { results.hidden = true; return; }
-    shown = findFunctions(q, 40);
+    const { fns, files } = search2(q, 40, /[/.]/.test(q) ? 8 : 4);
+    // a query that only matches paths is most likely a file name: list the files first
+    const filesFirst = files.length && (!fns.length || !fns[0].idx.length);
+    shown = [];
+    const fnItems = () => {
+      if (filesFirst && fns.length) results.append(el("li", { class: "divider" }, "Functions in matching files"));
+      for (const m of fns) {
+        const f = m.f, k = shown.length;
+        shown.push({ fn: m });
+        const label = el("span", { class: "label" });
+        if (f.s) label.append(el("span", { class: "scope" }, f.s + sep(f)));
+        label.append(marked(f.n, m.idx), "()");
+        results.append(el("li", { class: "opt", onmousedown: (e) => { e.preventDefault(); pick(k); } },
+          el("span", { class: "icon " + f.k }, KIND_LETTER[f.k]), label, el("span", { class: "path" }, fileOf(f) + ":" + f.l)));
+      }
+    };
+    const fileItems = () => {
+      if (files.length && (!filesFirst || fns.length)) results.append(el("li", { class: "divider" }, "Files"));
+      for (const m of files) {
+        const k = shown.length, file = FILES[m.fi];
+        shown.push({ file: m });
+        results.append(el("li", { class: "opt", onmousedown: (e) => { e.preventDefault(); pick(k); } },
+          el("span", { class: "icon file" }, "▫"), el("span", { class: "label" }, marked(file.p, m.idx)),
+          el("span", { class: "path" }, byFile[m.fi].filter((f) => f.k !== "toplevel").length + " functions")));
+      }
+    };
+    if (filesFirst) { fileItems(); fnItems(); } else { fnItems(); fileItems(); }
     active = 0;
-    shown.forEach((f, i) => results.append(el("li", { class: i === 0 ? "active" : "", onmousedown: (e) => { e.preventDefault(); pick(i); } },
-      el("span", { class: "icon " + f.k }, KIND_LETTER[f.k]), fnLabel(f), el("span", { class: "path" }, fileOf(f) + ":" + f.l))));
-    if (!shown.length) results.append(el("li", { class: "muted" }, "No functions match"));
+    const first = results.querySelector("li.opt");
+    if (first) first.classList.add("active");
+    if (!shown.length) results.append(el("li", { class: "muted" }, "Nothing matches"));
     results.hidden = false;
   }
-  function pick(i) { const f = shown[i]; if (!f) return; results.hidden = true; search.blur(); go(f.id); }
+  function pick(i) {
+    const it = shown[i];
+    if (!it) return;
+    results.hidden = true; search.blur();
+    if (it.fn) go(it.fn.f.id); else revealFile(it.file.fi);
+  }
   search.addEventListener("input", runSearch);
   search.addEventListener("focus", () => { if (search.value) runSearch(); });
   search.addEventListener("blur", () => setTimeout(() => (results.hidden = true), 100));
   search.addEventListener("keydown", (e) => {
-    const items = results.querySelectorAll("li");
+    const items = results.querySelectorAll("li.opt");
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       if (!shown.length) return;
@@ -1709,7 +1814,8 @@
     else if (e.key === "Escape") { search.value = ""; results.hidden = true; search.blur(); }
   });
   document.addEventListener("keydown", (e) => {
-    if (e.key === "/" && document.activeElement !== search) { e.preventDefault(); search.focus(); search.select(); }
+    if ((e.key === "/" && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName))
+        || ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "p"))) { e.preventDefault(); search.focus(); search.select(); }
     if (e.key === "Escape") hidePopup();
     const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
     const m = /^#\/f\/(\d+)/.exec(location.hash);
