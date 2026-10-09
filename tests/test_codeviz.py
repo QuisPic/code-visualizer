@@ -125,3 +125,10 @@ def test_big_pages_carry_gzipped_data(graph):
     packed = re.search(r'const DATA_GZ = "([A-Za-z0-9+/=]+)";', html).group(1)
     assert json.loads(gzip.decompress(base64.b64decode(packed))) == data
     assert 'const DATA_GZ = "";' in render(data)  # small pages stay plain
+
+
+def test_complexity(graph):
+    _, find, _ = graph
+    assert find("classify")["cx"] == 7  # 1 + if, and, elif, for, if, except
+    assert find("label")["cx"] == 2  # nested function: 1 + ternary
+    assert "cx" not in find("straight")  # 1 is left out of the data
