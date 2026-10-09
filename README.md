@@ -108,7 +108,9 @@ Swift, Ruby, PHP, Lua.
 ## How calls are linked
 
 There is no type checker involved: a call is matched to function definitions **by name**, then
-ranked by how close each candidate is to the caller: `self`/`this` → same class, a matching
+ranked by how close each candidate is to the caller. When the receiver is a variable, parameter or member
+with a declared or obvious type (`Shape s`, `s: Shape`, `s = Shape()`, `auto s = new Shape`, `self.s = Shape()`)
+and that class is visible from the caller, `s.area()` goes straight to `Shape.area`. Otherwise: `self`/`this` → same class, a matching
 qualifier (`ns::f`, `module.f`, `Class::f`), same file, the `.h`/`.cpp` pair, an imported or
 included file, same directory, nearest directory.
 

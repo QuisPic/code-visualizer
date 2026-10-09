@@ -1,6 +1,7 @@
 """Link each call site to the function definition(s) it most likely refers to.
 
-Resolution is name based (no type inference), ranked by how close the candidate is to the
+Resolution is name based, helped by declared types (`Foo f`, `f: Foo`, `f = new Foo()`) of locals,
+parameters and members when a call's receiver is one of those, and ranked by how close the candidate is to the
 caller: same class, matching qualifier, same file, header/source pair, included/imported
 file, same directory.
 """
@@ -8,7 +9,9 @@ file, same directory.
 from __future__ import annotations
 
 import posixpath
+import re
 from collections import defaultdict
+from dataclasses import replace
 from typing import NamedTuple
 from pathlib import PurePosixPath
 
@@ -52,6 +55,17 @@ class Resolver:
         # path facts are compared for every candidate of every call, so work them out once
         self.paths = {path: _path_info(path) for path in self.files}
         self._cache: dict[tuple, tuple[list[int], str]] = {}
+        self.class_files: dict[str, set[str]] = defaultdict(set)  # class name -> files defining its methods
+        for fn in self.functions:
+            if fn.scope and fn.kind != "toplevel":
+                self.class_files[fn.scope[-1]].add(fn.path)
+        self.field_types: dict[str, dict[str, str]] = defaultdict(dict)
+        for f in files:
+            for key, fields in f.field_types.items():
+                for name, typ in fields.items():
+                    prev = self.field_types[key].get(name)
+                    self.field_types[key][name] = typ if prev in (None, typ) else ""
+
         self._quals: dict[tuple, tuple[bool, bool, list[str], str]] = {}
         # for import bindings: top-level functions and constructors by (file, name)
         self.in_file: dict[tuple[str, str], list[int]] = defaultdict(list)
@@ -181,6 +195,29 @@ class Resolver:
         path = self.module_file(caller.path, spec)
         return self._defined(path, name) if path else None
 
+    def _receiver_type(self, caller: Function, q: str) -> str | None:
+        """Class of a call's receiver when it is a typed local, parameter or member (`f`, `self.f`, `this->f`)."""
+        m = re.fullmatch(r"(?:self|this)(?:\.|->)([A-Za-z_]\w*)", q)
+        if m:
+            typ = self.field_types.get(".".join(caller.scope), {}).get(m.group(1))
+        elif re.fullmatch(r"[A-Za-z_$][\w$]*", q):
+            typ = caller.var_types.get(q)
+            if typ is None and caller.lang.family in ("c", "java"):  # implicit this: `m_foo->bar()`
+                typ = self.field_types.get(".".join(caller.scope), {}).get(q)
+        else:
+            return None
+        if not typ or typ not in self.class_files:
+            return None
+        # only trust it when the class is visible from the caller (same file/dir, or imported), so a
+        # same-named class elsewhere isn't linked with confidence
+        here = PurePosixPath(caller.path)
+        imports = self.files[caller.path].imports
+        for path in self.class_files[typ]:
+            p = PurePosixPath(path)
+            if p.parent == here.parent or p.stem in imports or p.parent.name in imports:
+                return typ
+        return None
+
     def _score(self, call: Call, caller: Function, cand: Function) -> int | None:
         if cand.lang.family != caller.lang.family:
             return None
@@ -249,6 +286,13 @@ class Resolver:
 
     def resolve(self, caller: Function, call: Call) -> tuple[list[int], str]:
         """Return (target function ids, confidence) where confidence is high | low | ambiguous."""
+        # a typed receiver changes the answer, so swap it in before the cache lookup
+        if call.qualifier and call.sep in (".", "->"):
+            typ = self._receiver_type(caller, call.qualifier)
+            # skip it when the method isn't on that class (probably inherited: keep the name-based guess)
+            if typ and any(self.functions[i].scope and self.functions[i].scope[-1] == typ
+                           for i in self.by_name.get(call.name, ())):
+                call = replace(call, qualifier=typ)  # `s.area()` with `Shape s` -> `Shape.area()`
         # the answer only depends on these, and the same call repeats a lot within a file
         key = (caller.path, tuple(caller.scope), caller.receiver, call.name, call.qualifier, call.sep, call.ctor)
         hit = self._cache.get(key)

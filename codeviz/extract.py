@@ -59,6 +59,7 @@ class Function:
     receiver: str | None = None  # Go receiver variable, e.g. `s` in `func (s *Server) Start()`
     doc: str = ""  # comment right above the definition, or a Python docstring
     complexity: int = 1  # cyclomatic: 1 + branches, loops, cases, catches and && / ||
+    var_types: dict[str, str] = field(default_factory=dict)  # local/parameter name -> declared class name
 
 
 @dataclass
@@ -72,6 +73,64 @@ class FileInfo:
     # local name -> (module spec, imported name or None for the module itself), e.g.
     # `from .util import clean as c` -> {"c": (".util", "clean")}, `import * as ns from "./x"` -> {"ns": ("./x", None)}
     bindings: dict[str, tuple[str, str | None]] = field(default_factory=dict)
+    field_types: dict[str, dict[str, str]] = field(default_factory=dict)  # "ns.Class" -> member name -> class name
+
+
+# Declarations that give a variable, parameter or member a type (or a value whose type is obvious).
+_DECLS = {
+    "declaration", "parameter_declaration", "optional_parameter_declaration", "field_declaration",
+    "variable_declarator", "formal_parameter", "required_parameter", "optional_parameter",
+    "typed_parameter", "typed_default_parameter", "assignment", "assignment_expression",
+    "short_var_declaration", "var_spec", "parameter", "let_declaration", "public_field_definition",
+}
+_WRAPPERS = {"unique_ptr", "shared_ptr", "weak_ptr", "optional", "Box", "Rc", "Arc", "RefCell", "Option",
+             "Optional", "Ref", "Ptr", "QPointer", "QSharedPointer", "make_unique", "make_shared"}
+_FACTORIES = {"new", "create", "make", "default", "from", "getInstance", "instance", "shared"}
+_TYPE_NOISE = re.compile(r"\b(?:const|volatile|mut|struct|class|typename|final|readonly|dyn|impl)\b|[&*?^]|\[\]")
+
+
+def _first_arg(args: str) -> str:
+    depth = 0
+    for i, ch in enumerate(args):
+        if ch in "<[(":
+            depth += 1
+        elif ch in ">])":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            return args[:i]
+    return args
+
+
+def _type_name(text: str) -> str | None:
+    """Class name from a declared type: `const ns::Foo&` -> Foo, `std::unique_ptr<Foo>` -> Foo."""
+    text = _TYPE_NOISE.sub(" ", text.strip().strip("'\"")).strip()
+    text = text.split("|")[0].strip()  # `Foo | None`
+    for _ in range(4):
+        m = re.fullmatch(r"([\w:.]+)\s*[<\[](.*)[>\]]", text, re.S)
+        if not m or re.split(r"::|\.", m.group(1))[-1] not in _WRAPPERS:
+            break
+        text = _first_arg(m.group(2)).strip()
+    parts = _split_qualified(_TEMPLATE_ARGS.sub("", re.sub(r"\[.*\]", "", text)).replace(".", "::"))
+    name = parts[-1] if parts else ""
+    return name if _IDENT.fullmatch(name) else None
+
+
+def _value_type(text: str) -> str | None:
+    """Class a value is obviously an instance of: `new Foo(..)`, `Foo(..)`, `Foo::new()`, `&Foo{}`."""
+    m = re.match(r"\s*(?:new\s+|&\s*)?([A-Za-z_][\w.:]*(?:<[^()]*>)?)\s*[({]", text)
+    if not m:
+        return None
+    path = m.group(1)
+    tm = re.fullmatch(r"([\w.:]+)<(.*)>", path)
+    if tm and _split_qualified(tm.group(1))[-1] in _WRAPPERS:
+        return _type_name(tm.group(2))
+    parts = _split_qualified(_TEMPLATE_ARGS.sub("", path).replace(".", "::"))
+    if len(parts) > 1 and parts[-1] in _FACTORIES:
+        parts = parts[:-1]
+    name = parts[-1] if parts else ""
+    if name.startswith("New") and len(name) > 3 and name[3].isupper():
+        name = name[3:]  # Go: NewServer() -> Server
+    return name if _IDENT.fullmatch(name) else None
 
 
 def _text(node: Node | None) -> str:
@@ -126,6 +185,7 @@ class _Extractor:
         self.functions: list[Function] = []
         self.classes: list[tuple[list[str], str]] = []
         self.toplevel: Function | None = None
+        self.field_types: dict[str, dict[str, str]] = {}
 
     # ---- helpers -------------------------------------------------------------------------
     def _col(self, node: Node) -> int:
@@ -362,6 +422,73 @@ class _Extractor:
             return None
         return Call(name, q, sep, name_node.start_point[0] + 1, self._col(name_node))
 
+    # ---- declared types ------------------------------------------------------------------
+    def _declared(self, node: Node) -> list[tuple[str, str]]:
+        """(name, class name) pairs a declaration introduces; names may be `self.x` / `this.x` for members."""
+        t = node.type
+        type_node = node.child_by_field_name("type")
+        if t == "variable_declarator" and type_node is None and node.parent is not None:
+            type_node = node.parent.child_by_field_name("type")  # Java: `Foo a = ..., b;`
+        value = node.child_by_field_name("value") or node.child_by_field_name("right")
+        targets: list[Node] = []
+        if t in ("declaration", "parameter_declaration", "optional_parameter_declaration", "field_declaration") \
+                and self.lang.family == "c":
+            for i, child in enumerate(node.children):
+                if node.field_name_for_child(i) == "declarator":
+                    targets.append(child)
+        else:
+            n = (node.child_by_field_name("name") or node.child_by_field_name("pattern")
+                 or node.child_by_field_name("left"))
+            if n is None and t == "typed_parameter":
+                n = next((c for c in node.named_children if c.type == "identifier"), None)
+            if n is not None and n.type == "expression_list":
+                n = n.named_children[0] if n.named_child_count == 1 else None
+            if value is not None and value.type == "expression_list":
+                value = value.named_children[0] if value.named_child_count == 1 else None
+            if n is not None:
+                targets.append(n)
+        out = []
+        for target in targets:
+            # C declarators: `*p`, `&r`, `p = value`
+            while target.type in ("init_declarator", "pointer_declarator", "reference_declarator"):
+                if target.type == "init_declarator":
+                    value = target.child_by_field_name("value") or value
+                inner = target.child_by_field_name("declarator")
+                if inner is None:
+                    inner = next((c for c in target.named_children if c.type in ("identifier", "field_identifier")), None)
+                if inner is None:
+                    break
+                target = inner
+            name = _text(target)
+            if not (_IDENT.fullmatch(name) or re.fullmatch(r"(?:self|this)(?:\.|->)[A-Za-z_]\w*", name)):
+                continue
+            typ = _type_name(_text(type_node)) if type_node is not None else None
+            if typ in (None, "auto", "var", "let", "Self") and value is not None and value.type != "argument_list":
+                typ = _value_type(_text(value))
+            if typ is None and value is not None and value.type == "argument_list" and type_node is not None:
+                typ = _type_name(_text(type_node))  # C++ `Foo f(1);`
+            if typ:
+                out.append((name, typ))
+        return out
+
+    def _record_types(self, node: Node, scope: list[str], func: Function | None, in_class: bool) -> None:
+        for name, typ in self._declared(node):
+            if "." in name or "->" in name:  # self.x = Foo() inside a method
+                if func is None or not func.scope:
+                    continue
+                key, name = ".".join(func.scope), re.split(r"\.|->", name)[-1]
+            elif func is not None:
+                prev = func.var_types.get(name)
+                func.var_types[name] = typ if prev in (None, typ) else ""  # "" = conflicting types, don't use
+                continue
+            elif in_class and scope:
+                key = ".".join(scope)  # a member declared in the class body
+            else:
+                continue
+            fields = self.field_types.setdefault(key, {})
+            prev = fields.get(name)
+            fields[name] = typ if prev in (None, typ) else ""
+
     # ---- traversal -----------------------------------------------------------------------
     def _new_function(self, node: Node, parts: list[str], scope: list[str], in_class: bool) -> Function:
         full_scope = scope + parts[:-1]
@@ -420,6 +547,8 @@ class _Extractor:
                         func.complexity += 1
                 elif t in ("binary_expression", "binary") and _text(node.child_by_field_name("operator")) in _LOGICAL:
                     func.complexity += 1
+            if t in _DECLS:
+                self._record_types(node, scope, func, in_class)
 
             for child in reversed(node.children):
                 if child.is_named:
@@ -544,4 +673,4 @@ def extract_file(lang: Language, parser, rel_path: str, source: bytes) -> FileIn
         ex.toplevel.code = ""  # top-level code is shown via its call list only
         functions = [ex.toplevel] + functions
     return FileInfo(rel_path, lang, source.count(b"\n") + 1, _imports(source), functions, ex.classes,
-                    _bindings(lang, tree.root_node))
+                    _bindings(lang, tree.root_node), {k: v for k, v in ex.field_types.items() if v})
