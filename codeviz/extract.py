@@ -152,7 +152,7 @@ _BASE_SKIP = {"keyword_argument", "access_specifier", "type_arguments", "templat
 
 def _base_names(node: Node) -> list[str]:
     out = []
-    for child in node.named_children:
+    for child in [node] if node.type in _BASE_NAMES else node.named_children:
         if child.type in _BASE_SKIP:
             continue
         if child.type in _BASE_NAMES:
@@ -558,7 +558,8 @@ class _Extractor:
                         child_in_class = True
                         self.classes.append((scope, name[-1]))
                         heritage = [c for c in node.named_children if c.type in _HERITAGE]
-                        supers = node.child_by_field_name("superclasses")  # Python: class A(B, C)
+                        supers = (node.child_by_field_name("superclasses")  # Python: class A(B, C)
+                                  or (node.child_by_field_name("trait") if t == "impl_item" else None))  # Rust
                         if supers is not None:
                             heritage.append(supers)
                         bases = [b for h in heritage for b in _base_names(h)]
