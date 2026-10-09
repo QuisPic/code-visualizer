@@ -23,6 +23,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="exclude files or directories matching GLOB (repeatable), e.g. -x tests -x 'docs/*'")
     ap.add_argument("--no-default-excludes", action="store_true",
                     help=f"don't skip the usual vendored/build dirs ({', '.join(DEFAULT_EXCLUDES[:6])}, ...)")
+    ap.add_argument("--changed-since", metavar="REF",
+                    help="mark functions changed since a branch/commit (e.g. main), uncommitted edits included")
     ap.add_argument("--json", action="store_true", help="also write the raw call graph as <output>.json")
     ap.add_argument("--no-compress", action="store_true",
                     help="keep the data as plain JSON in the page even when it is big (larger file)")
@@ -34,7 +36,7 @@ def main(argv: list[str] | None = None) -> int:
     name = args.name or (args.source.rstrip("/").split("/")[-1].removesuffix(".git") if is_git_url(args.source)
                          else Path(args.source).expanduser().resolve().name)
     with checkout(args.source, args.ref) as root:
-        data = build(root, name, excludes, quiet=args.quiet)
+        data = build(root, name, excludes, quiet=args.quiet, changed_since=args.changed_since)
 
     out = Path(args.output or f"{name}-codeviz.html")
     out.write_text(render(data, compress=False if args.no_compress else None), encoding="utf-8")
@@ -45,6 +47,8 @@ def main(argv: list[str] | None = None) -> int:
     if not args.quiet:
         print(f"{s['files']} files, {s['functions']} functions, {s['calls']} calls "
               f"({s['resolved']} linked) in {s['seconds']}s -> {out}", file=sys.stderr)
+        if "changed" in data:
+            print(f"{data['changed']['functions']} functions changed since {args.changed_since}", file=sys.stderr)
     if args.open:
         webbrowser.open(out.resolve().as_uri())
     return 0

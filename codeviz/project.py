@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fnmatch
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -48,6 +49,64 @@ def checkout(source: str, ref: str | None = None):
         yield tmp / "repo"
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+_HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", re.MULTILINE)
+
+
+def _git(root: Path, *args: str) -> str | None:
+    try:
+        res = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, errors="replace")
+    except OSError:
+        return None
+    return res.stdout if res.returncode == 0 else None
+
+
+def changed_lines(root: Path, ref: str) -> tuple[dict[str, set[int]], dict[str, set[int]]]:
+    """Lines changed since `ref` (where the current branch left it, uncommitted edits included).
+
+    Returns (touched, added): touched lines per file (a deletion touches the line after it) and
+    the subset that is newly added, used to tell new functions from modified ones.
+    """
+    if _git(root, "rev-parse", "--verify", "--quiet", ref + "^{commit}") is None:
+        # a shallow clone (git URL) doesn't have the ref yet
+        _git(root, "fetch", "--quiet", "--depth", "200", "origin", ref)
+        _git(root, "fetch", "--quiet", "--deepen", "200")
+        if _git(root, "rev-parse", "--verify", "--quiet", "FETCH_HEAD") is not None and \
+                _git(root, "rev-parse", "--verify", "--quiet", ref + "^{commit}") is None:
+            ref = "FETCH_HEAD"
+    base = (_git(root, "merge-base", ref, "HEAD") or "").strip() or ref
+    diff = _git(root, "diff", "--unified=0", "--no-color", "--no-ext-diff", "--no-renames", base, "--")
+    if diff is None:
+        raise SystemExit(f"error: can't diff against {ref!r} (not a git repo, or unknown branch/commit)")
+    touched: dict[str, set[int]] = {}
+    added: dict[str, set[int]] = {}
+    for chunk in re.split(r"^diff --git ", diff, flags=re.MULTILINE)[1:]:
+        m = re.search(r"^\+\+\+ b/(.+)$", chunk, re.MULTILINE)
+        if not m:
+            continue  # deleted file
+        path = m.group(1)
+        t, a = touched.setdefault(path, set()), added.setdefault(path, set())
+        new_file = "\nnew file mode" in chunk.split("@@", 1)[0]
+        for h in _HUNK.finditer(chunk):
+            start, count = int(h.group(1)), int(h.group(2) or 1)
+            if count == 0:
+                t.add(max(start, 1))  # pure deletion after line `start`
+            else:
+                lines = range(start, start + count)
+                t.update(lines)
+                if new_file:
+                    a.update(lines)
+                else:
+                    # lines starting with "+" in this hunk are additions; a hunk that also removes
+                    # lines is a modification, so only count it as added when nothing was removed
+                    body = chunk[h.end():].split("\n@@", 1)[0]
+                    if not re.search(r"^-", body, re.MULTILINE):
+                        a.update(lines)
+    for path in (_git(root, "ls-files", "--others", "--exclude-standard") or "").splitlines():
+        n = sum(1 for _ in open(root / path, "rb")) if (root / path).is_file() else 0
+        touched[path] = added[path] = set(range(1, n + 1))
+    return touched, added
 
 
 def _excluded(rel: str, patterns: list[str]) -> bool:
@@ -99,7 +158,7 @@ def _parsers():
     return get
 
 
-def build(root: Path, name: str, excludes: list[str], quiet: bool = False) -> dict:
+def build(root: Path, name: str, excludes: list[str], quiet: bool = False, changed_since: str | None = None) -> dict:
     t0 = time.time()
     get_parser = _parsers()
     files: list[FileInfo] = []
@@ -117,6 +176,7 @@ def build(root: Path, name: str, excludes: list[str], quiet: bool = False) -> di
             if not quiet:
                 print(f"warning: skipped {rel}: {exc}", file=sys.stderr)
 
+    touched, added = changed_lines(root, changed_since) if changed_since else ({}, {})
     resolver = Resolver(files)
     funcs = resolver.functions
     file_index = {f.path: i for i, f in enumerate(files)}
@@ -144,12 +204,18 @@ def build(root: Path, name: str, excludes: list[str], quiet: bool = False) -> di
             record["d"] = fn.doc
         if fn.complexity > 1:
             record["cx"] = fn.complexity
+        lines = touched.get(fn.path)
+        if lines and fn.kind != "toplevel" and any(fn.start <= ln <= fn.end for ln in lines):
+            span = range(fn.start, fn.end + 1)
+            record["ch"] = "n" if all(ln in added[fn.path] for ln in span) else "m"  # new | modified
         out_funcs.append(record)
     data = {
         "name": name,
         "generated": time.strftime("%Y-%m-%d %H:%M"),
         "files": [{"p": f.path, "lang": f.lang.name, "lines": f.lines} for f in files],
         "funcs": out_funcs,
+        **({"changed": {"ref": changed_since,
+                        "functions": sum(1 for f in out_funcs if "ch" in f)}} if changed_since else {}),
         "stats": {"files": len(files), "functions": sum(1 for f in funcs if f.kind != "toplevel"),
                   "skipped": skipped, **counts, "seconds": round(time.time() - t0, 2)},
     }
