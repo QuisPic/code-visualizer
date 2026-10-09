@@ -22,7 +22,8 @@ Open the generated `<name>-codeviz.html` in a browser. No server, no internet ne
   A collapsed node shows how many calls are behind it (**+5**); shift-click it to open three levels at
   once. **?** shows a legend for the colours and line styles. **Export** saves the graph as it is on
   screen as an SVG or PNG image, or copies it as a Mermaid diagram that GitHub and most wikis render
-  inside Markdown.
+  inside Markdown. The arrow keys walk the graph too: → follows a call (expanding it), ← goes back,
+  ↑/↓ move within a column, Space expands or collapses, Enter opens the selected function.
 - **Impact**: the third tab lists everything that can end up calling the function, grouped by how many
   calls away it is, with a summary ("can affect 58 functions in 21 files, reaching 36 entry points").
   Click a row to see where it makes the call; links that rely on a name-only guess are marked.

@@ -510,6 +510,7 @@
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
 
+  let graphKeys = null; // keyboard handler of the graph on screen, set by buildCallGraph
   const G = { nodeH: 42, rowGap: 14, colGap: 70, maxLabel: 46, font: "", metaFont: "", sans: "" };
 
   function buildCallGraph(rootFn, dir, container, codeBox, showSource) {
@@ -936,6 +937,50 @@
         ? n.item.targets.length + " functions are named " + n.label + " — expand the node with + to see them, then select one."
         : n.label + " is not defined in this codebase (library, built-in or unresolved), so there is no code to show.");
     }
+    // keyboard: arrows walk the tree (toward callees/callers, and up/down within a column),
+    // Space or +/- expands, Enter opens the selected function
+    function reveal(n) {
+      const c = pos(n), W = wrap.clientWidth, H = wrap.clientHeight, m = 30;
+      const x0 = view.x + c.x * view.k, y0 = view.y + c.y * view.k;
+      const x1 = x0 + n.w * view.k, y1 = y0 + G.nodeH * view.k;
+      if (x0 < m) view.x += m - x0; else if (x1 > W - m) view.x -= Math.min(x1 - (W - m), x0 - m);
+      if (y0 < m) view.y += m - y0; else if (y1 > H - m) view.y -= y1 - (H - m);
+      applyView();
+    }
+    function onKey(e) {
+      const cur = positions.get(selectedKey)?.n || root;
+      // callees grow to the right and callers to the left; the root of the "both" view grows both ways
+      const deeper = cur.side === "both" ? e.key : cur.side === "in" ? "ArrowLeft" : "ArrowRight";
+      const shallower = cur.side === "both" ? null : cur.side === "in" ? "ArrowRight" : "ArrowLeft";
+      let next = null;
+      if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && e.key === deeper) {
+        if (cur.expandable && !cur.open && !cur.cycle) toggle(cur);
+        const side = cur.side === "both" ? (e.key === "ArrowLeft" ? "in" : "out") : cur.side;
+        const kids = visibleKids(cur).filter((k) => k.side === side);
+        next = kids.length ? kids.reduce((a, k) => (Math.abs(pos(k).y - pos(cur).y) < Math.abs(pos(a).y - pos(cur).y) ? k : a)) : null;
+      } else if (e.key === shallower) {
+        next = cur.parent;
+      } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        // the nearest node in the same column, above or below
+        const y = pos(cur).y, down = e.key === "ArrowDown";
+        for (const { n } of positions.values()) {
+          if (n.depth !== cur.depth || n.side !== cur.side || n === cur) continue;
+          const ny = pos(n).y;
+          if (down ? ny > y : ny < y) if (!next || Math.abs(ny - y) < Math.abs(pos(next).y - y)) next = n;
+        }
+      } else if (e.key === " " || e.key === "+" || e.key === "=" || e.key === "-") {
+        if (cur.expandable && (e.key === " " || (e.key === "-") === cur.open)) toggle(cur);
+        select(positions.get(cur.key).n); reveal(cur);
+      } else if (e.key === "Enter") {
+        if (cur.item.type === "fn" && cur.depth > 0) go(cur.item.id, dir);
+      } else if (e.key === "Home") {
+        next = root;
+      } else return false;
+      if (next) { select(next); reveal(next); }
+      return true;
+    }
+    graphKeys = (e) => (wrap.isConnected ? onKey(e) : false);
+
     svgEl.addEventListener("pointerup", endDrag);
     svgEl.addEventListener("pointercancel", () => { drag = null; wrap.classList.remove("panning", "dragging-node"); });
     svgEl.addEventListener("wheel", (e) => { // wheel / pinch zooms around the cursor, shift+wheel scrolls sideways
@@ -1450,7 +1495,7 @@
         card(s.resolved, "linked to code here"), card(s.external, "external / library")),
       el("p", { class: "help" }, "Pick a function in the explorer or search with ", el("kbd", null, "/"),
         ". The graph shows the function as a node linked to every function it calls (switch to ", el("b", null, "Callers"),
-        " for the reverse). Click a node to see its code, expand it with +, double-click it to open that function, drag nodes to move them, drag the background to pan, scroll to zoom, and use ", el("kbd", null, "Alt"), "+",
+        " for the reverse). Click a node to see its code, expand it with +, double-click it to open that function, drag nodes to move them, drag the background to pan, scroll to zoom, walk the graph with the arrow keys (Space expands, Enter opens), and use ", el("kbd", null, "Alt"), "+",
         el("kbd", null, "←"), " to go back. Calls in the source are links too. Links are resolved by name, so ",
         el("span", { style: "color:var(--warn)" }, "amber"), " marks a name with several candidates and dashed underlines mark best guesses."),
       el("h2", null, "Codebase map"),
@@ -1939,8 +1984,11 @@
   document.addEventListener("keydown", (e) => {
     if ((e.key === "/" && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName))
         || ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "p"))) { e.preventDefault(); search.focus(); search.select(); }
+    const a = document.activeElement;
+    const typing = a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.tagName === "SELECT" || a.isContentEditable);
+    const onControl = a && (a.tagName === "BUTTON" || a.tagName === "A") && (e.key === " " || e.key === "Enter");
+    if (!typing && !onControl && !e.altKey && !e.ctrlKey && !e.metaKey && graphKeys && graphKeys(e)) e.preventDefault();
     if (e.key === "Escape") hidePopup();
-    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
     const m = /^#\/f\/(\d+)/.exec(location.hash);
     if (!typing && m && (e.key === "b" || e.key === "B") && !e.ctrlKey && !e.metaKey && !e.altKey) toggleMark(+m[1]);
   });
