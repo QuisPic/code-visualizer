@@ -406,3 +406,12 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height:
 .cls-groups summary .badge { white-space: nowrap; }
 .cls-groups .cls-open { font-size: 11px; color: var(--accent); text-decoration: none; flex: none; }
 .cls-groups ul { margin: 0 0 6px 14px; }
+
+/* hotspots */
+.hotspots details { border-bottom: 1px solid var(--border); max-width: 900px; }
+.hotspots summary { display: flex; align-items: center; gap: 8px; padding: 4px 2px; cursor: pointer; list-style: none; min-width: 0; }
+.hotspots summary::-webkit-details-marker { display: none; }
+.hotspots summary .label { font-family: var(--mono); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hotspots summary .badge { white-space: nowrap; }
+.hotspots .hs-bar { height: 8px; border-radius: 4px; background: var(--warn); flex: none; opacity: .8; }
+.hotspots ul { margin: 0 0 6px 18px; }

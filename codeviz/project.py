@@ -194,8 +194,24 @@ def source_link(root: Path) -> str | None:
     return _LINK_STYLES[style].replace("{repo}", url).replace("{sha}", sha).replace("{path}", prefix + "{path}")
 
 
+def churn(root: Path, since: str) -> dict[str, int]:
+    """Number of commits since `since` (any `git log --since` date) that touched each file, relative to `root`."""
+    def git(*args: str) -> str:
+        return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=True).stdout
+    try:
+        out = git("log", "--no-merges", f"--since={since}", "--format=%x00", "--name-only", "--relative", "--", ".")
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return {}
+    counts: dict[str, int] = {}
+    for commit in out.split("\0")[1:]:
+        for path in {p for p in commit.split("\n") if p.strip()}:
+            counts[path] = counts.get(path, 0) + 1
+    return counts
+
+
 def build(root: Path, name: str, excludes: list[str], quiet: bool = False, changed_since: str | None = None,
-          link: str | None = None) -> dict:
+          link: str | None = None,
+          churn_since: str | None = None) -> dict:
     t0 = time.time()
     get_parser = _parsers()
     files: list[FileInfo] = []
@@ -246,10 +262,12 @@ def build(root: Path, name: str, excludes: list[str], quiet: bool = False, chang
             span = range(fn.start, fn.end + 1)
             record["ch"] = "n" if all(ln in added[fn.path] for ln in span) else "m"  # new | modified
         out_funcs.append(record)
+    changes = churn(root, churn_since) if churn_since else {}
     data = {
         "name": name,
         "generated": time.strftime("%Y-%m-%d %H:%M"),
-        "files": [{"p": f.path, "lang": f.lang.name, "lines": f.lines} for f in files],
+        "files": [{"p": f.path, "lang": f.lang.name, "lines": f.lines,
+                   **({"cc": changes[f.path]} if changes.get(f.path) else {})} for f in files],
         "funcs": out_funcs,
         **({"changed": {"ref": changed_since,
                         "functions": sum(1 for f in out_funcs if "ch" in f)}} if changed_since else {}),
@@ -258,4 +276,14 @@ def build(root: Path, name: str, excludes: list[str], quiet: bool = False, chang
     }
     if link:
         data["link"] = link
+    if churn_since:
+        data["churn"] = {"since": churn_since, "commits": _commit_count(root, churn_since) if changes else 0}
     return data
+
+
+def _commit_count(root: Path, since: str) -> int:
+    try:
+        return int(subprocess.run(["git", "-C", str(root), "rev-list", "--count", "--no-merges", f"--since={since}",
+                                   "HEAD", "--", "."], capture_output=True, text=True, check=True).stdout.strip())
+    except (subprocess.CalledProcessError, FileNotFoundError, ValueError):
+        return 0

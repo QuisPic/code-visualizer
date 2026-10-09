@@ -33,6 +33,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="URL for 'open in browser' links, with {path}, {line}, {end} and {root} "
                          "(default: the git remote's GitHub/GitLab/Bitbucket page for the scanned commit)")
     ap.add_argument("--no-link", action="store_true", help="don't add links to the repository's web page")
+    ap.add_argument("--churn", nargs="?", const="1 year", metavar="SINCE",
+                    help="count how often each file changed in git since SINCE (default: 1 year) and list "
+                         "hotspots: big files that change a lot")
     ap.add_argument("-q", "--quiet", action="store_true")
     args = ap.parse_args(argv)
 
@@ -44,7 +47,7 @@ def main(argv: list[str] | None = None) -> int:
         if link:
             link = link.replace("{root}", root.as_posix())  # e.g. vscode://file{root}/{path}:{line}
         data = build(root, name, excludes, quiet=args.quiet, changed_since=args.changed_since,
-                     link=link)
+                     link=link, churn_since=args.churn)
 
     out = Path(args.output or f"{name}-codeviz.html")
     out.write_text(render(data, compress=False if args.no_compress else None), encoding="utf-8")

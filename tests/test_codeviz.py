@@ -221,3 +221,23 @@ def test_inherited_methods(graph):
     assert targets(find("boot"), "calibrate") == ["Sensor.calibrate"]
     confidences = {c["x"] for f in (find("press"), find("boot")) for c in f["calls"]}
     assert confidences == {"h"}
+
+
+def test_churn(tmp_path):
+    import subprocess
+
+    def git(*args):
+        subprocess.run(["git", "-C", str(tmp_path), "-c", "user.email=t@t", "-c", "user.name=t", *args],
+                       check=True, capture_output=True)
+
+    git("init", "-q")
+    (tmp_path / "a.py").write_text("def f():\n    pass\n")
+    (tmp_path / "b.py").write_text("def g():\n    pass\n")
+    git("add", ".")
+    git("commit", "-qm", "one")
+    (tmp_path / "a.py").write_text("def f():\n    return 1\n")
+    git("commit", "-qam", "two")
+    data = build(tmp_path, "t", [], quiet=True, churn_since="1 year")
+    assert {f["p"]: f.get("cc") for f in data["files"]} == {"a.py": 2, "b.py": 1}
+    assert data["churn"] == {"since": "1 year", "commits": 2}
+    assert "churn" not in build(tmp_path, "t", [], quiet=True)
