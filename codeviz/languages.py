@@ -80,6 +80,26 @@ LANGUAGES: list[Language] = [
              _fs("function_call_expression", "member_call_expression", "scoped_call_expression",
                  "nullsafe_member_call_expression"),
              _fs("object_creation_expression"), _fs("__construct"), _fs("$this", "self", "static")),
+    Language("csharp", "csharp", (".cs",),
+             _fs("method_declaration", "constructor_declaration", "destructor_declaration",
+                 "local_function_statement"),
+             # namespaces are left out of the scope, like Java packages, to keep labels short
+             {"class_declaration": "name", "struct_declaration": "name", "interface_declaration": "name",
+              "record_declaration": "name", "enum_declaration": "name"},
+             _fs("invocation_expression"), _fs("object_creation_expression")),
+    # Kotlin's grammar has few field names; extract.py falls back to the first identifier child
+    Language("kotlin", "java", (".kt", ".kts"),
+             _fs("function_declaration", "secondary_constructor"),
+             {"class_declaration": "name", "object_declaration": "name", "companion_object": None},
+             _fs("call_expression"), constructor_names=_fs("constructor")),
+    Language("swift", "swift", (".swift",),
+             _fs("function_declaration", "init_declaration", "deinit_declaration"),
+             # class_declaration also covers struct, enum, actor and extension
+             {"class_declaration": "name", "protocol_declaration": "name"},
+             _fs("call_expression"), constructor_names=_fs("init"), self_names=_fs("self", "Self")),
+    Language("lua", "lua", (".lua",),
+             _fs("function_declaration", "function_definition"),
+             {}, _fs("function_call"), self_names=_fs("self")),
 ]
 
 BY_EXTENSION: dict[str, Language] = {ext: lang for lang in LANGUAGES for ext in lang.extensions}

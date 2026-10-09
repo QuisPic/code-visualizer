@@ -5,7 +5,8 @@
   const FILES = DATA.files;
   const FUNCS = DATA.funcs;
   const FAMILY = { python: "py", javascript: "js", typescript: "js", tsx: "js", c: "c", cpp: "c", go: "go",
-                   rust: "rust", java: "java", ruby: "rb", php: "php" };
+                   rust: "rust", java: "java", ruby: "rb", php: "php", csharp: "cs", kotlin: "kt", swift: "swift",
+                   lua: "lua" };
   const KIND_LETTER = { function: "ƒ", method: "m", constructor: "c", toplevel: "⋯" };
   const $ = (sel, root = document) => root.querySelector(sel);
 
@@ -78,6 +79,10 @@
     rust: "as async await break const continue crate dyn else enum extern false fn for if impl in let loop match mod move mut pub ref return self Self static struct super trait true type unsafe use where while",
     java: "abstract assert boolean break byte case catch char class const continue default do double else enum extends final finally float for goto if implements import instanceof int interface long native new null package private protected public return short static strictfp super switch synchronized this throw throws transient try void volatile while true false var record",
     rb: "alias and begin break case class def defined? do else elsif end ensure false for if in module next nil not or redo rescue retry return self super then true undef unless until when while yield",
+    cs: "abstract as async await base bool break byte case catch char checked class const continue decimal default delegate do double else enum event explicit extern false finally fixed float for foreach get goto if implicit in init int interface internal is lock long namespace new null object operator out override params partial private protected public readonly record ref return sbyte sealed set short sizeof stackalloc static string struct switch this throw true try typeof uint ulong unchecked unsafe ushort using var virtual void volatile when where while yield",
+    kt: "abstract annotation as break by catch class companion const constructor continue crossinline data do else enum external false final finally for fun get if import in infix init inline inner interface internal is lateinit noinline null object open operator out override package private protected public reified return sealed set super suspend this throw true try typealias val var vararg when where while",
+    swift: "actor any as associatedtype async await break case catch class continue default defer deinit do else enum extension fallthrough false fileprivate final for func guard if import in indirect init inout internal is lazy let mutating nil nonisolated open operator override private protocol public repeat rethrows return self Self some static struct subscript super switch throw throws true try typealias var weak where while",
+    lua: "and break do else elseif end false for function goto if in local nil not or repeat return then true until while self",
     php: "abstract and array as break callable case catch class clone const continue declare default do echo else elseif empty enddeclare endfor endforeach endif endswitch endwhile extends final finally fn for foreach function global goto if implements include include_once instanceof insteadof interface isset list match namespace new null or print private protected public readonly require require_once return static switch throw trait try unset use var while xor true false",
   };
   const KW = {}; for (const k in KEYWORDS) KW[k] = new Set(KEYWORDS[k].split(" "));
@@ -85,12 +90,15 @@
   function tokenRe(fam) {
     if (TOKEN_RE[fam]) return TOKEN_RE[fam];
     const hashCom = fam === "py" || fam === "rb";
+    const lua = fam === "lua";
     const parts = [
-      hashCom ? null : "(\\/\\*[\\s\\S]*?(?:\\*\\/|$))",           // 1 block comment
-      hashCom ? "(#[^\\n]*)" : (fam === "php" ? "(\\/\\/[^\\n]*|#[^\\n]*)" : "(\\/\\/[^\\n]*)"), // 2 line comment
-      fam === "py" ? "(\"\"\"[\\s\\S]*?(?:\"\"\"|$)|'''[\\s\\S]*?(?:'''|$))" : null, // 3 triple strings
+      hashCom ? null : lua ? "(--\\[=*\\[[\\s\\S]*?(?:\\]=*\\]|$))" : "(\\/\\*[\\s\\S]*?(?:\\*\\/|$))", // 1 block comment
+      hashCom ? "(#[^\\n]*)" : lua ? "(--[^\\n]*)" : (fam === "php" ? "(\\/\\/[^\\n]*|#[^\\n]*)" : "(\\/\\/[^\\n]*)"), // 2 line comment
+      fam === "py" ? "(\"\"\"[\\s\\S]*?(?:\"\"\"|$)|'''[\\s\\S]*?(?:'''|$))"
+        : fam === "kt" || fam === "swift" || fam === "cs" ? "(\"\"\"[\\s\\S]*?(?:\"\"\"|$))"
+        : lua ? "(\\[=*\\[[\\s\\S]*?(?:\\]=*\\]|$))" : null,     // 3 triple / long strings
       "(\"(?:[^\"\\\\\\n]|\\\\.)*\"?|'(?:[^'\\\\\\n]|\\\\.)*'?" + (fam === "js" || fam === "go" ? "|`(?:[^`\\\\]|\\\\.)*`?" : "") + ")", // 4 strings
-      fam === "c" ? "(^[ \\t]*#[^\\n]*)" : null,                    // 5 preprocessor
+      fam === "c" || fam === "cs" ? "(^[ \\t]*#[^\\n]*)" : null,    // 5 preprocessor
       "(\\b\\d[\\w.]*)",                                           // 6 numbers
       "([A-Za-z_$][\\w$]*)",                                       // 7 identifiers
     ];

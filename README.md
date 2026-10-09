@@ -78,7 +78,8 @@ In a git work tree, files ignored by `.gitignore` are skipped and checked-out su
 
 ## Languages
 
-C, C++, Python, JavaScript (incl. JSX / ExtendScript `.jsx`), TypeScript/TSX, Go, Rust, Java, Ruby, PHP.
+C, C++, C#, Python, JavaScript (incl. JSX / ExtendScript `.jsx`), TypeScript/TSX, Go, Rust, Java, Kotlin,
+Swift, Ruby, PHP, Lua.
 
 ## How calls are linked
 

@@ -65,6 +65,29 @@ def test_go_rust_java(graph):
     assert targets(find("run"), "helper") == ["App.helper"]
 
 
+def test_csharp_kotlin_swift_lua(graph):
+    _, find, targets = graph
+    # C#: this., Class.Static(), new Foo() -> constructor; namespaces stay out of the scope like Java packages
+    assert find("Prepare")["s"] == "Invoice"
+    assert targets(find("Prepare"), "Recalculate") == ["Invoice.Recalculate"]
+    assert targets(find("Recalculate"), "ToCents") == ["Rounding.ToCents"]
+    assert targets(find("Create"), "Invoice") == ["Invoice.Invoice"]
+    assert targets(find("Prepare"), "WriteLine") == []
+    # Kotlin: extension function belongs to its receiver class, object methods, stdlib stays external
+    assert targets(find("checkout"), "addItem") == ["Cart.addItem"]
+    assert targets(find("addItem"), "recount") == ["Cart.recount"]
+    assert targets(find("addItem"), "record") == ["Ledger.record"]
+    assert targets(find("addItem"), "add") == []
+    # Swift: init is the constructor, extensions share the class scope
+    assert targets(find("startPlayer"), "Player") == ["Player.init"]
+    assert targets(find("playNext"), "refresh") == ["Player.refresh"]
+    assert targets(find("enqueue"), "append") == []
+    # Lua: `function T:m()` and `self:m()`, local functions, functions assigned to variables
+    assert targets(find("new", "game.lua"), "reset") == ["Board.reset"]
+    assert targets(find("new", "game.lua"), "clamp") == ["clamp"]
+    assert find("onTick")["k"] == "function"
+
+
 def test_toplevel_calls(graph):
     _, find, targets = graph
     assert targets(find("(top level)", "ui.js"), "start") == ["start"]
