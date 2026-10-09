@@ -26,8 +26,8 @@ There is no linter, formatter config, JS build step or CI. Generated `*-codeviz.
 | `codeviz/languages.py` | one `Language` per grammar: extensions, tree-sitter node types for functions/scopes/calls, constructor and `self` names. `family` decides which languages may call each other (c↔cpp, js↔ts↔tsx) |
 | `codeviz/extract.py` | walks a tree-sitter tree into `FileInfo` / `Function` / `Call` dataclasses; each file also gets a `(top level)` pseudo-function (`kind="toplevel"`) for module-level calls |
 | `codeviz/resolve.py` | `Resolver`: name-based call linking, no type inference. Candidates with the same name are scored (same class, qualifier match, same file, `.h`/`.cpp` pair, imports, directory distance); returns confidence `high` / `low` / `ambiguous` |
-| `codeviz/render.py` | inlines `viewer/style.css`, `viewer/app.js` and the JSON into `viewer/index.html` placeholders (`/*__STYLE__*/`, `/*__APP__*/`, `/*__DATA__*/null`, `__TITLE__`), escaping `</` and `<!--` |
-| `codeviz/viewer/` | the page: plain HTML/CSS/vanilla JS in one IIFE, no framework, no CDN, no build. Reads the `DATA` global |
+| `codeviz/render.py` | inlines `viewer/style.css`, `viewer/app.js` and the JSON into `viewer/index.html` placeholders (`/*__STYLE__*/`, `/*__APP__*/`, `/*__DATA__*/null`, `/*__DATA_GZ__*/`, `__TITLE__`), escaping `</` and `<!--`. JSON over 512 KB goes in gzipped + base64 (`DATA_GZ`) instead; `--no-compress` turns that off |
+| `codeviz/viewer/` | the page: plain HTML/CSS/vanilla JS in one IIFE, no framework, no CDN, no build. `app.js` runs inside `codeviz(DATA)`, called by a loader in `index.html` once the data is ready (unpacked with `DecompressionStream` when gzipped) |
 
 ### Data format (`build()` output, the `DATA` global, `--json`)
 

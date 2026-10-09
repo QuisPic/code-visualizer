@@ -59,7 +59,7 @@ which downloads each language's grammar the first time it is needed.
 ## Options
 
 ```
-codeviz SOURCE [-o OUT.html] [--ref BRANCH] [--name NAME] [-x GLOB ...] [--no-default-excludes] [--json] [--open]
+codeviz SOURCE [-o OUT.html] [--ref BRANCH] [--name NAME] [-x GLOB ...] [--no-default-excludes] [--json] [--no-compress] [--open]
 ```
 
 | option | |
@@ -69,6 +69,7 @@ codeviz SOURCE [-o OUT.html] [--ref BRANCH] [--name NAME] [-x GLOB ...] [--no-de
 | `-x, --exclude` | skip files/dirs matching a glob, repeatable (`-x tests -x 'docs/*'`) |
 | `--no-default-excludes` | also scan `node_modules`, `vendor`, `build`, `dist`, … |
 | `--json` | also write the raw call graph next to the HTML |
+| `--no-compress` | keep the page's data as plain JSON (by default, big pages store it gzipped, about 4× smaller) |
 | `--open` | open the result in your browser |
 
 In a git work tree, files ignored by `.gitignore` are skipped and checked-out submodules are included.

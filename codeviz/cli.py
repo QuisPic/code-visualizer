@@ -24,6 +24,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-default-excludes", action="store_true",
                     help=f"don't skip the usual vendored/build dirs ({', '.join(DEFAULT_EXCLUDES[:6])}, ...)")
     ap.add_argument("--json", action="store_true", help="also write the raw call graph as <output>.json")
+    ap.add_argument("--no-compress", action="store_true",
+                    help="keep the data as plain JSON in the page even when it is big (larger file)")
     ap.add_argument("--open", action="store_true", help="open the result in a browser")
     ap.add_argument("-q", "--quiet", action="store_true")
     args = ap.parse_args(argv)
@@ -35,7 +37,7 @@ def main(argv: list[str] | None = None) -> int:
         data = build(root, name, excludes, quiet=args.quiet)
 
     out = Path(args.output or f"{name}-codeviz.html")
-    out.write_text(render(data), encoding="utf-8")
+    out.write_text(render(data, compress=False if args.no_compress else None), encoding="utf-8")
     if args.json:
         import json
         out.with_suffix(".json").write_text(json.dumps(data, indent=1), encoding="utf-8")

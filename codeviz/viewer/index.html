@@ -34,10 +34,26 @@
     <ul id="explorer" class="tree explorer"></ul>
   </aside>
   <div class="splitter" id="split-sidebar"></div>
-  <main id="main"></main>
+  <main id="main"><div class="empty-note">Loading…</div></main>
 </div>
 <div id="popup" class="popup" hidden></div>
 <script>const DATA = /*__DATA__*/null;</script>
-<script>/*__APP__*/</script>
+<script>const DATA_GZ = "/*__DATA_GZ__*/";</script>
+<script>function codeviz(DATA) {
+/*__APP__*/
+}</script>
+<script>
+// Big pages carry their data gzipped and base64-encoded (DATA_GZ); unpack it with the browser's own
+// DecompressionStream before starting the app. Small pages carry plain JSON in DATA.
+(function () {
+  if (DATA) { codeviz(DATA); return; }
+  const fail = (e) => { document.getElementById("main").textContent = "This browser can’t unpack the page’s data (" + e + "). Try a current Chrome, Edge, Firefox or Safari, or regenerate with --no-compress."; };
+  try {
+    const bytes = Uint8Array.from(atob(DATA_GZ), (c) => c.charCodeAt(0));
+    new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"))).text()
+      .then((text) => codeviz(JSON.parse(text)), fail);
+  } catch (e) { fail(e); }
+})();
+</script>
 </body>
 </html>

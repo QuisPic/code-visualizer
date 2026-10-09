@@ -88,3 +88,17 @@ def test_cli_writes_self_contained_html(tmp_path):
     data = json.loads(payload.replace("<\\/", "</"))
     assert data["stats"]["functions"] > 20
     assert json.loads(out.with_suffix(".json").read_text())["name"] == "mixed"
+
+
+def test_big_pages_carry_gzipped_data(graph):
+    import base64
+    import gzip
+
+    from codeviz.render import render
+
+    data = graph[0]
+    html = render(data, compress=True)
+    assert "const DATA = null;" in html
+    packed = re.search(r'const DATA_GZ = "([A-Za-z0-9+/=]+)";', html).group(1)
+    assert json.loads(gzip.decompress(base64.b64decode(packed))) == data
+    assert 'const DATA_GZ = "";' in render(data)  # small pages stay plain
