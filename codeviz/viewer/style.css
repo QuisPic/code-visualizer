@@ -417,3 +417,10 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height:
 .hotspots summary .badge { white-space: nowrap; }
 .hotspots .hs-bar { height: 8px; border-radius: 4px; background: var(--warn); flex: none; opacity: .8; }
 .hotspots ul { margin: 0 0 6px 18px; }
+/* overview section links */
+.ov-nav { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 18px 0 0; font-size: 12px; }
+.ov-nav .muted { margin-right: 4px; }
+.ov-nav .chip { font: inherit; padding: 2px 9px; border-radius: 12px; border: 1px solid var(--border); background: var(--bg-2); color: var(--fg); cursor: pointer; }
+.ov-nav .chip:hover { border-color: var(--accent); color: var(--accent); }
+.overview h2 { scroll-margin-top: 12px; }
+.badge.copies { background: none; border: 1px dashed var(--border); }

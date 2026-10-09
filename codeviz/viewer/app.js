@@ -1795,10 +1795,20 @@
       return seen.size - 1;
     };
     const shownCallers = (id) => callers[id].filter((c) => !hidden(c.from));
-    const entries = FUNCS.filter((f) => !hidden(f.id) && !shownCallers(f.id).length && f.calls.some((c) => c.t))
-      .map((f) => ({ f, n: reach(f.id) })).sort((a, b) => b.n - a.n).slice(0, 30);
-    const popular = real.filter((f) => !hidden(f.id)).map((f) => ({ f, n: new Set(shownCallers(f.id).map((c) => c.from)).size }))
-      .filter((x) => x.n > 1).sort((a, b) => b.n - a.n).slice(0, 30);
+    // copy-pasted helpers (same name and code in many files) would fill a list: keep one row per copy group
+    const dedupe = (items) => {
+      const groups = new Map();
+      for (const it of items) {
+        const key = it.f.code ? it.f.n + "\0" + it.f.code : it.f.id; // top-level pseudo-functions have no code
+        const g = groups.get(key);
+        if (g) g.copies++; else groups.set(key, Object.assign(it, { copies: 1 }));
+      }
+      return [...groups.values()];
+    };
+    const entries = dedupe(FUNCS.filter((f) => !hidden(f.id) && !shownCallers(f.id).length && f.calls.some((c) => c.t))
+      .map((f) => ({ f, n: reach(f.id) })).sort((a, b) => b.n - a.n)).slice(0, 30);
+    const popular = dedupe(real.filter((f) => !hidden(f.id)).map((f) => ({ f, n: new Set(shownCallers(f.id).map((c) => c.from)).size }))
+      .filter((x) => x.n > 1).sort((a, b) => b.n - a.n)).slice(0, 30);
     // changed functions, ranked by how many functions can reach them (what the change can affect)
     const upstream = (id) => {
       const seen = new Set([id]), stack = [id];
@@ -1820,8 +1830,10 @@
       for (const { f, n, copies } of items) {
         const li = fnRow(f, () => go(f.id), false);
         if (f.ch) li.firstChild.append(chDot(f));
-        li.firstChild.append(el("span", { class: "badge " + (clsFn ? clsFn(n) : "") }, metaFn(n)),
-          el("span", { class: "meta" }, fileOf(f) + (copies > 1 ? "  +" + (copies - 1) + " identical cop" + (copies > 2 ? "ies" : "y") : "")));
+        li.firstChild.append(...[el("span", { class: "badge " + (clsFn ? clsFn(n) : "") }, metaFn(n)),
+          copies > 1 ? el("span", { class: "badge copies", title: "The same function (name and code) is in " + (copies - 1)
+            + " other file" + (copies > 2 ? "s" : "") + "; only this copy is listed" }, "+" + (copies - 1) + " copies") : null,
+          el("span", { class: "meta" }, fileOf(f))].filter(Boolean));
         ul.append(li);
       }
       return ul;
@@ -1855,6 +1867,7 @@
         "Most complex (" + real.filter((f) => cx(f) > 10).length.toLocaleString() + " above 10)") : null,
       complex.length ? list(complex, (n) => "complexity " + n, (n) => "cx " + cxLevel(n)) : null,
       cycleSection(), neverCalledSection()));
+    sectionNav(main.lastChild);
   }
 
 
@@ -2193,6 +2206,18 @@
         el("span", { class: "meta" }, r.loc.toLocaleString() + " lines in functions")), ul));
     }
     return box;
+  }
+
+  // Jump links to the overview's sections, built from its headings so new sections show up on their own.
+  function sectionNav(page) {
+    const heads = [...page.querySelectorAll("h2")];
+    if (heads.length < 3) return;
+    const nav = el("nav", { class: "ov-nav" }, el("span", { class: "muted" }, "Jump to"));
+    for (const h of heads) {
+      const label = h.textContent.replace(/\s*\(.*$/, "");
+      nav.append(el("button", { class: "chip", onclick: () => h.scrollIntoView({ block: "start", behavior: "smooth" }) }, label));
+    }
+    page.insertBefore(nav, heads[0]);
   }
 
   // ---------------------------------------------------------------- routing
