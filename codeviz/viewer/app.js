@@ -1074,6 +1074,52 @@
     revealInExplorer(f);
   }
 
+  function cycleSection() {
+    const cycles = callCycles();
+    if (!cycles.length) return null;
+    const ul = el("ul", { class: "tree cycle-list" });
+    for (const comp of cycles.slice(0, 20)) {
+      const fns = comp.map((id) => FUNCS[id]).sort((a, b) => fileOf(a).localeCompare(fileOf(b)) || a.l - b.l);
+      const row = el("div", { class: "row cycle-row" }, el("span", { class: "badge" }, comp.length + " functions"));
+      fns.slice(0, 6).forEach((f, i) => {
+        if (i) row.append(el("span", { class: "muted" }, "⇄"));
+        row.append(el("a", { href: "#/f/" + f.id, class: "mono", "data-hc": f.id }, f.n + "()"));
+      });
+      if (fns.length > 6) row.append(el("span", { class: "muted" }, "… +" + (fns.length - 6)));
+      ul.append(el("li", null, row));
+    }
+    return el("section", null, el("h2", null, "Call cycles (functions that can call each other in a loop)"),
+      el("p", { class: "help small" }, cycles.length + " group" + (cycles.length === 1 ? "" : "s") + " of mutually recursive functions"
+        + (cycles.length > 20 ? ", largest 20 shown" : "") + ". Some may come from best-guess links."), ul);
+  }
+  function neverCalledSection() {
+    const dead = FUNCS.filter((f) => f.k !== "toplevel" && f.k !== "constructor" && !callers[f.id].length && !f.calls.some((c) => c.t));
+    if (!dead.length) return null;
+    const byF = new Map();
+    for (const f of dead) { if (!byF.has(f.f)) byF.set(f.f, []); byF.get(f.f).push(f); }
+    const files = [...byF.entries()].sort((a, b) => b[1].length - a[1].length);
+    const ul = el("ul", { class: "tree" });
+    for (const [fi, fns] of files.slice(0, 40)) {
+      const row = el("div", { class: "row", onclick: (e) => fileFunctionsList(e.currentTarget, fns) },
+        el("span", { class: "icon file" }, "▫"), el("span", { class: "label" }, FILES[fi].p), el("span", { class: "badge" }, String(fns.length)));
+      ul.append(el("li", null, row));
+    }
+    return el("details", { class: "never-called" },
+      el("summary", null, el("h2", null, "Isolated functions (" + dead.length.toLocaleString() + ")")),
+      el("p", { class: "help small" }, "Not called from anywhere in this codebase and calling nothing in it: dead code, or reached only "
+        + "from outside (callbacks, exported API, tests, virtual or dynamic dispatch). Grouped by file."), ul);
+  }
+  function fileFunctionsList(anchor, fns) {
+    popup.textContent = "";
+    const ul = el("ul", { class: "tree popup-scroll" });
+    for (const f of fns.sort((a, b) => a.l - b.l)) ul.append(fnRow(f, () => { hidePopup(); go(f.id); }, false));
+    popup.append(ul);
+    popup.hidden = false;
+    const r = anchor.getBoundingClientRect(), pr = popup.getBoundingClientRect();
+    popup.style.left = Math.max(8, Math.min(r.left + 40, innerWidth - pr.width - 8)) + "px";
+    popup.style.top = (r.bottom + pr.height + 8 > innerHeight ? Math.max(8, r.top - pr.height - 4) : r.bottom + 4) + "px";
+  }
+
   function showOverview() {
     document.title = DATA.name + " · codeviz";
     main.textContent = "";
@@ -1116,10 +1162,176 @@
         " for the reverse). Click a node to see its code, expand it with +, double-click it to open that function, drag nodes to move them, drag the background to pan, scroll to zoom, and use ", el("kbd", null, "Alt"), "+",
         el("kbd", null, "←"), " to go back. Calls in the source are links too. Links are resolved by name, so ",
         el("span", { style: "color:var(--warn)" }, "amber"), " marks a name with several candidates and dashed underlines mark best guesses."),
+      el("h2", null, "Codebase map"),
+      el("p", { class: "help small" }, "Each box is a file, sized by lines of code. Click a folder to zoom in, a file to list its functions."),
+      codebaseMap(),
       entries.length ? el("h2", null, "Entry points (not called from anywhere, ranked by how much they reach)") : null,
       entries.length ? list(entries, (n) => n + " reachable") : null,
       popular.length ? el("h2", null, "Most called") : null,
-      popular.length ? list(popular, (n) => n + " callers") : null));
+      popular.length ? list(popular, (n) => n + " callers") : null,
+      cycleSection(), neverCalledSection()));
+  }
+
+
+  // ---------------------------------------------------------------- codebase map (treemap)
+  // Squarified treemap of directories → files, area = lines of code. Directories are drawn as frames
+  // with a title bar; clicking one zooms into it, clicking a file lists its functions.
+  const LANG_COLORS = { c: "#5c7cfa", cpp: "#4c6ef5", python: "#37b24d", javascript: "#f59f00", typescript: "#1c7ed6", tsx: "#1098ad",
+                        go: "#15aabf", rust: "#e8590c", java: "#d6336c", ruby: "#e03131", php: "#7048e8" };
+  function squarify(items, x, y, w, h) { // items: [{v}] sorted desc; returns [{item, x, y, w, h}]
+    const out = [];
+    let rest = items.slice(), total = rest.reduce((a, b) => a + b.v, 0);
+    while (rest.length) {
+      const short = Math.min(w, h), scale = (w * h) / total;
+      let row = [], rowSum = 0, best = Infinity;
+      for (const it of rest) {
+        const s2 = rowSum + it.v;
+        const rmax = Math.max(it.v, ...row.map((r) => r.v)) * scale, rmin = Math.min(it.v, ...row.map((r) => r.v)) * scale;
+        const side = s2 * scale / short;
+        const worst = Math.max((side * side) / rmin, rmax / (side * side));
+        if (row.length && worst > best) break;
+        best = worst; row.push(it); rowSum = s2;
+      }
+      const side = rowSum * scale / short;
+      let off = 0;
+      for (const it of row) {
+        const len = it.v * scale / side;
+        out.push(w >= h ? { item: it, x, y: y + off, w: side, h: len } : { item: it, x: x + off, y, w: len, h: side });
+        off += len;
+      }
+      if (w >= h) { x += side; w -= side; } else { y += side; h -= side; }
+      rest = rest.slice(row.length); total -= rowSum;
+    }
+    return out;
+  }
+  function mapTree() { // directory tree with line totals
+    const root = { name: DATA.name, path: "", dirs: new Map(), files: [], v: 0 };
+    FILES.forEach((file, i) => {
+      let d = root;
+      const parts = file.p.split("/");
+      for (const part of parts.slice(0, -1)) {
+        if (!d.dirs.has(part)) d.dirs.set(part, { name: part, path: (d.path ? d.path + "/" : "") + part, dirs: new Map(), files: [], v: 0, parent: d });
+        d = d.dirs.get(part);
+      }
+      d.files.push({ file: i, v: Math.max(1, file.lines), name: parts[parts.length - 1] });
+    });
+    const sum = (d) => (d.v = [...d.dirs.values()].reduce((a, c) => a + sum(c), 0) + d.files.reduce((a, f) => a + f.v, 0));
+    sum(root);
+    return root;
+  }
+  function codebaseMap() {
+    const root = mapTree();
+    const fileCallers = FILES.map(() => 0);
+    for (const f of FUNCS) fileCallers[f.f] += new Set(callers[f.id].filter((c) => FUNCS[c.from].f !== f.f).map((c) => c.from)).size;
+    const maxIn = Math.max(1, ...fileCallers);
+    let mode = prefs.mapColor || "lang", current = root;
+    const box = el("div", { class: "cmap" });
+    const crumbs = el("div", { class: "cmap-crumbs" });
+    const legend = el("div", { class: "cmap-legend" });
+    const modeBtn = (m, label, title) => el("button", { class: "tab" + (mode === m ? " active" : ""), title, onclick: (e) => {
+      mode = prefs.mapColor = m; savePrefs();
+      for (const b of e.target.parentNode.children) b.classList.toggle("active", b === e.target);
+      draw();
+    } }, label);
+    const head = el("div", { class: "cmap-head" }, crumbs, el("div", { class: "tabs seg" },
+      modeBtn("lang", "Language", "Colour files by language"),
+      modeBtn("in", "Used by", "Colour files by how many functions in other files call into them")));
+    const color = (fi) => {
+      if (mode === "lang") return LANG_COLORS[FILES[fi].lang] || "#868e96";
+      const t = Math.sqrt(fileCallers[fi] / maxIn);
+      return `color-mix(in srgb, var(--accent) ${Math.round(12 + t * 88)}%, var(--bg-3))`;
+    };
+    function draw() {
+      box.textContent = ""; crumbs.textContent = ""; legend.textContent = "";
+      const chain = [];
+      for (let d = current; d; d = d.parent) chain.unshift(d);
+      chain.forEach((d, i) => {
+        if (i) crumbs.append(el("span", { class: "muted" }, " / "));
+        crumbs.append(i === chain.length - 1 ? el("b", null, d.name) : el("a", { href: "#", onclick: (e) => { e.preventDefault(); current = d; draw(); } }, d.name));
+      });
+      const W = box.clientWidth || 800, H = box.clientHeight || 420;
+      layoutDir(current, 0, 0, W, H, 0);
+      if (mode === "lang") {
+        const langs = [...new Set(FILES.map((f) => f.lang))];
+        for (const l of langs) legend.append(el("span", null, el("i", { style: "background:" + (LANG_COLORS[l] || "#868e96") }), l));
+      } else legend.append(el("span", { class: "muted" }, "darker = called from more functions in other files (max " + maxIn + ")"));
+    }
+    const TITLE = 17, PAD = 2;
+    function layoutDir(d, x, y, w, h, depth) {
+      const kids = [...[...d.dirs.values()].map((c) => ({ dir: c, v: c.v })), ...d.files.map((f) => ({ file: f, v: f.v }))]
+        .filter((k) => k.v > 0).sort((a, b) => b.v - a.v);
+      for (const r of squarify(kids, x, y, w, h)) {
+        if (r.w < 2 || r.h < 2) continue;
+        if (r.item.dir) {
+          const dd = r.item.dir;
+          const frame = el("div", { class: "cmap-dir", style: `left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px`,
+            title: dd.path + "/ · " + dd.v.toLocaleString() + " lines" });
+          if (r.h > TITLE + 8 && r.w > 30) frame.append(el("div", { class: "cmap-dtitle" }, dd.name + "/"));
+          frame.addEventListener("click", (e) => { e.stopPropagation(); current = dd; draw(); });
+          box.append(frame);
+          const top = r.h > TITLE + 8 && r.w > 30 ? TITLE : PAD;
+          if (r.w > 2 * PAD + 4 && r.h > top + PAD + 4) layoutDir(dd, r.x + PAD, r.y + top, r.w - 2 * PAD, r.h - top - PAD, depth + 1);
+        } else {
+          const fi = r.item.file.file, file = FILES[fi];
+          const n = byFile[fi].filter((f) => f.k !== "toplevel").length;
+          const pale = mode === "in" && fileCallers[fi] / maxIn < 0.2;
+          const cell = el("div", { class: "cmap-file" + (pale ? " pale" : ""), style: `left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;background:${color(fi)}`,
+            title: file.p + "\n" + file.lines.toLocaleString() + " lines · " + n + " function" + (n === 1 ? "" : "s")
+              + (fileCallers[fi] ? " · called from " + fileCallers[fi] + " function" + (fileCallers[fi] === 1 ? "" : "s") + " in other files" : "") });
+          if (r.w > 46 && r.h > 16) cell.append(el("span", null, r.item.file.name));
+          cell.addEventListener("click", (e) => { e.stopPropagation(); fileFunctions(cell, fi); });
+          box.append(cell);
+        }
+      }
+    }
+    const wrap = el("div", { class: "cmap-wrap" }, head, box, legend);
+    new ResizeObserver(() => draw()).observe(box);
+    return wrap;
+  }
+  function fileFunctions(anchor, fi) {
+    const fns = byFile[fi].filter((f) => f.k !== "toplevel").sort((a, b) => a.l - b.l);
+    popup.textContent = "";
+    popup.append(el("div", { class: "popup-title" }, FILES[fi].p + " · " + fns.length + " function" + (fns.length === 1 ? "" : "s")));
+    const ul = el("ul", { class: "tree popup-scroll" });
+    for (const f of fns) ul.append(fnRow(f, () => { hidePopup(); go(f.id); }, false));
+    if (!fns.length) ul.append(el("li", { class: "empty-note" }, "No functions found in this file."));
+    popup.append(ul);
+    popup.hidden = false;
+    const r = anchor.getBoundingClientRect(), pr = popup.getBoundingClientRect();
+    popup.style.left = Math.max(8, Math.min(r.left + 10, innerWidth - pr.width - 8)) + "px";
+    popup.style.top = Math.max(8, Math.min(r.top + 10, innerHeight - pr.height - 8)) + "px";
+  }
+
+  // ---------------------------------------------------------------- cycles and never-called functions
+  function callCycles() { // strongly connected components of size > 1 (Tarjan, iterative), ignoring ambiguous links
+    const idx = new Int32Array(FUNCS.length).fill(-1), low = new Int32Array(FUNCS.length), onStack = new Uint8Array(FUNCS.length);
+    const stack = [], out = [];
+    let counter = 0;
+    const succ = (id) => [...new Set(FUNCS[id].calls.filter((c) => c.t && c.x !== "a").map((c) => c.t[0]))];
+    for (let s0 = 0; s0 < FUNCS.length; s0++) {
+      if (idx[s0] >= 0) continue;
+      const work = [[s0, succ(s0), 0]];
+      idx[s0] = low[s0] = counter++; stack.push(s0); onStack[s0] = 1;
+      while (work.length) {
+        const top = work[work.length - 1];
+        const [v, next] = top;
+        if (top[2] < next.length) {
+          const w = next[top[2]++];
+          if (idx[w] < 0) { idx[w] = low[w] = counter++; stack.push(w); onStack[w] = 1; work.push([w, succ(w), 0]); }
+          else if (onStack[w]) low[v] = Math.min(low[v], idx[w]);
+        } else {
+          work.pop();
+          if (work.length) { const u = work[work.length - 1][0]; low[u] = Math.min(low[u], low[v]); }
+          if (low[v] === idx[v]) {
+            const comp = [];
+            let w;
+            do { w = stack.pop(); onStack[w] = 0; comp.push(w); } while (w !== v);
+            if (comp.length > 1) out.push(comp);
+          }
+        }
+      }
+    }
+    return out.sort((a, b) => b.length - a.length);
   }
 
 
