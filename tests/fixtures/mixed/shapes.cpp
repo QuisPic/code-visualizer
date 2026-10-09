@@ -4,6 +4,9 @@
 namespace geo {
 double Shape::area() const { return 1.0; }
 
+/**
+ * Sum of the areas of `n` shapes.
+ */
 double total(Shape const *shapes, int n)
 {
     double sum = 0;

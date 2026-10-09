@@ -135,11 +135,14 @@ def build(root: Path, name: str, excludes: list[str], quiet: bool = False) -> di
                 entry["t"] = targets
                 entry["x"] = conf[0]  # h | l | a
             calls.append(entry)
-        out_funcs.append({
+        record = {
             "id": i, "n": fn.name, "s": "::".join(fn.scope) if fn.lang.family in ("c", "rust", "php")
             else ".".join(fn.scope), "f": file_index[fn.path], "l": fn.start, "e": fn.end, "k": fn.kind,
             "code": fn.code, "calls": calls,
-        })
+        }
+        if fn.doc:
+            record["d"] = fn.doc
+        out_funcs.append(record)
     data = {
         "name": name,
         "generated": time.strftime("%Y-%m-%d %H:%M"),

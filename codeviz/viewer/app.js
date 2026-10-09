@@ -169,7 +169,8 @@
           const isSelf = c.t && c.t.length === 1 && c.t[0] === f.id;
           const kind = !c.t ? "" : c.x === "a" ? " amb" : c.x === "l" ? " low" : "";
           if (c.t && !isSelf) {
-            src.append(el("span", { class: "call" + kind, "data-call": link[i], title: callTitle(c) }, text));
+            src.append(el("span", { class: "call" + kind, "data-call": link[i], "data-hc": hcSpec(c),
+              "data-hc-hint": c.x === "a" ? "Click to choose one" : c.x === "l" ? "Best guess: matched by name only · click to open" : "Click to open" }, text));
           } else {
             src.append(cls[i] ? el("span", { class: CLS[cls[i]] + (isSelf ? "" : ""), title: isSelf ? "recursive call" : null }, text) : text);
           }
@@ -192,11 +193,7 @@
     });
     container.append(wrap);
   }
-  function callTitle(c) {
-    if (c.t.length > 1) return c.t.length + " possible targets, click to choose";
-    const t = FUNCS[c.t[0]];
-    return qname(t) + "  —  " + fileOf(t) + ":" + t.l + (c.x === "l" ? "  (best guess)" : "");
-  }
+  const hcSpec = (c) => (!c.t ? "x:" + c.n : c.t.length > 1 ? "a:" + c.t.join(",") : String(c.t[0]));
   function highlightLines(container, lines, scroll) {
     const set = new Set(lines);
     let first = null;
@@ -225,6 +222,103 @@
   function hidePopup() { popup.hidden = true; }
   document.addEventListener("mousedown", (e) => { if (!popup.hidden && !popup.contains(e.target)) hidePopup(); });
 
+  // ---------------------------------------------------------------- hover cards
+  // Any element with data-hc gets a card after a short hover: "<id>" for a function, "a:<id>,<id>"
+  // for an ambiguous call, "x:<name>" for an external one. data-hc-hint adds a muted footer line.
+  const hovercard = el("div", { class: "hovercard", role: "tooltip" });
+  hovercard.hidden = true;
+  document.body.append(hovercard);
+  let hcTimer = 0, hcAnchor = null;
+
+  // the declaration part of a function: its first line(s) up to the body
+  function signature(f) {
+    if (!f.code) return "";
+    const lines = f.code.split("\n");
+    let sig = "";
+    for (let i = 0; i < Math.min(lines.length, 4); i++) {
+      sig += (i ? "\n" : "") + lines[i];
+      const t = lines[i].trimEnd();
+      if (t.includes("{") || t.endsWith(":") || t.endsWith("=>")) break;
+    }
+    sig = sig.replace(/\s*\{[^{}]*$/, "").replace(/\s*\{\s*$/, "");
+    return sig.length > 300 ? sig.slice(0, 299) + "…" : sig;
+  }
+  function highlighted(code, fam) {
+    const cls = highlight(code, fam);
+    const out = el("code", { class: "hc-sig" });
+    for (let i = 0; i < code.length;) {
+      let j = i + 1;
+      while (j < code.length && cls[j] === cls[i]) j++;
+      out.append(cls[i] ? el("span", { class: CLS[cls[i]] }, code.slice(i, j)) : code.slice(i, j));
+      i = j;
+    }
+    return out;
+  }
+  function fnCardBody(f) {
+    const nCallees = new Set(f.calls.flatMap((c) => c.t || [])).size;
+    const nCallers = new Set(callers[f.id].map((c) => c.from)).size;
+    const lines = f.e - f.l + 1;
+    const parts = [
+      el("div", { class: "hc-head" }, el("span", { class: "icon " + f.k }, KIND_LETTER[f.k]), fnLabel(f)),
+      el("div", { class: "hc-file" }, fileOf(f) + ":" + f.l + (f.k === "toplevel" ? "" : " · " + lines + " line" + (lines === 1 ? "" : "s"))),
+    ];
+    const sig = signature(f);
+    if (sig) parts.push(highlighted(sig, FAMILY[FILES[f.f].lang] || "c"));
+    if (f.d) parts.push(el("div", { class: "hc-doc" }, f.d));
+    parts.push(el("div", { class: "hc-stats" },
+      el("span", null, el("b", null, String(nCallees)), " callee" + (nCallees === 1 ? "" : "s")),
+      el("span", null, el("b", null, String(nCallers)), " caller" + (nCallers === 1 ? "" : "s"))));
+    return parts;
+  }
+  function fillCard(spec, hint) {
+    hovercard.textContent = "";
+    if (spec.startsWith("a:")) {
+      const ids = spec.slice(2).split(",").map(Number);
+      hovercard.append(el("div", { class: "hc-head" }, el("span", { class: "icon amb" }, "?"),
+        el("span", { class: "label" }, FUNCS[ids[0]].n + "()")),
+        el("div", { class: "hc-note warn" }, ids.length + " functions share this name; any of them could be called here:"));
+      const ul = el("ul", { class: "hc-list" });
+      for (const id of ids.slice(0, 8)) ul.append(el("li", null, fnLabel(FUNCS[id]), el("span", { class: "muted" }, " " + fileOf(FUNCS[id]) + ":" + FUNCS[id].l)));
+      if (ids.length > 8) ul.append(el("li", { class: "muted" }, "… and " + (ids.length - 8) + " more"));
+      hovercard.append(ul);
+    } else if (spec.startsWith("x:")) {
+      hovercard.append(el("div", { class: "hc-head" }, el("span", { class: "icon ext" }, "·"), el("span", { class: "label" }, spec.slice(2) + "()")),
+        el("div", { class: "hc-note" }, "Not defined in this codebase: a library, a built-in, or a call that couldn’t be resolved."));
+    } else {
+      const f = FUNCS[+spec];
+      if (!f) return false;
+      hovercard.append(...fnCardBody(f));
+    }
+    if (hint) hovercard.append(el("div", { class: "hc-hint" }, hint));
+    return true;
+  }
+  function placeCard(anchor) {
+    const r = anchor.getBoundingClientRect();
+    hovercard.style.left = "0px"; hovercard.style.top = "0px";
+    const cw = hovercard.offsetWidth, ch = hovercard.offsetHeight;
+    const left = Math.max(8, Math.min(r.left, innerWidth - cw - 8));
+    const below = r.bottom + 6, above = r.top - ch - 6;
+    hovercard.style.left = left + "px";
+    hovercard.style.top = (below + ch <= innerHeight - 8 || above < 8 ? Math.min(below, innerHeight - ch - 8) : above) + "px";
+  }
+  function hideCard() { clearTimeout(hcTimer); hcAnchor = null; hovercard.hidden = true; }
+  document.addEventListener("mouseover", (e) => {
+    const a = e.target.closest && e.target.closest("[data-hc]");
+    if (a === hcAnchor) return;
+    hideCard();
+    if (!a || e.buttons) return;
+    hcAnchor = a;
+    hcTimer = setTimeout(() => {
+      if (hcAnchor !== a || !a.isConnected) return;
+      if (!fillCard(a.dataset.hc, a.dataset.hcHint)) return;
+      hovercard.hidden = false;
+      placeCard(a);
+    }, 380);
+  });
+  for (const ev of ["pointerdown", "wheel", "keydown"]) document.addEventListener(ev, hideCard, true);
+  // hovering a graph node scrolls the source to the call, which must not close the node's card
+  document.addEventListener("scroll", (e) => { if (hcAnchor && e.target.contains && e.target.contains(hcAnchor)) hideCard(); }, true);
+
   // ---------------------------------------------------------------- shared row builders
   function fnLabel(f, withScope = true) {
     const label = el("span", { class: "label" });
@@ -233,7 +327,7 @@
     return label;
   }
   function fnRow(f, onclick, showPath) {
-    return el("li", null, el("div", { class: "row", onclick, title: qname(f) + "\n" + fileOf(f) + ":" + f.l },
+    return el("li", null, el("div", { class: "row", onclick, "data-hc": f.id },
       el("span", { class: "caret leaf" }, "▸"),
       el("span", { class: "icon " + f.k }, KIND_LETTER[f.k]),
       fnLabel(f),
@@ -279,7 +373,8 @@
       if (cycle) row.append(el("span", { class: "badge cycle", title: "Already shown above in this branch" }, "↻ recursive"));
       row.append(el("span", { class: "meta" }, fileOf(f) + ":" + f.l));
       if (depth > 0) row.append(el("span", { class: "go" }, "open ↗"));
-      row.title = qname(f) + "\n" + fileOf(f) + ":" + f.l + (depth ? "\n\nClick to open · arrow to expand" : "");
+      row.dataset.hc = f.id;
+      if (depth) row.dataset.hcHint = "Click to open · arrow to expand";
       const n = (dir === "out" ? f.calls.some((c) => c.t) : callers[f.id].length);
       if (!n || cycle) caret.classList.add("leaf");
       row.addEventListener("click", (e) => {
@@ -496,11 +591,11 @@
         g.append(svg("text", { class: "glabel", x: tx0 + 12, y: 17 }, n.label));
         g.append(svg("text", { class: "gmeta", x: tx0 + 12, y: 33 }, n.cycle ? "↻ recursive · " + n.meta : n.item.low ? "guess · " + n.meta : n.meta));
         const isFn = n.item.type === "fn";
-        const tip = n.kind === "ext" ? "Not defined in this codebase" : n.kind === "amb" ? "Several functions share this name"
-          : qname(FUNCS[n.item.id]) + "\n" + fileOf(FUNCS[n.item.id]) + ":" + FUNCS[n.item.id].l;
-        const how = ["click to see its code", isFn && n.depth ? "double-click to open" : null,
+        const how = [n.kind === "ext" ? null : "click to see its code", isFn && n.depth ? "double-click to open" : null,
                      n.expandable ? "+ to " + (n.open ? "collapse" : "expand") : null, "drag to move"].filter(Boolean).join(" · ");
-        g.append(svg("title", null, tip + "\n\n" + how[0].toUpperCase() + how.slice(1)));
+        g.setAttribute("data-hc", isFn ? String(n.item.id) : n.kind === "amb" ? "a:" + n.item.targets.join(",")
+          : "x:" + n.label.replace(/\(\)$/, ""));
+        g.setAttribute("data-hc-hint", how[0].toUpperCase() + how.slice(1));
         if (n.expandable) {
           const tx = dir === "out" ? n.w - 2 : 2;
           g.append(svg("g", { class: "toggle", transform: `translate(${tx},${G.nodeH / 2})` },
@@ -717,6 +812,8 @@
     const addFns = (target, list) => {
       for (const f of list) {
         const item = explorerItem("fn:" + f.id, f.k, KIND_LETTER[f.k], f.k === "toplevel" ? f.n : f.n + "()", ":" + f.l, null, () => go(f.id));
+        item.row.removeAttribute("title");
+        item.row.dataset.hc = f.id;
         target.append(item.li);
       }
     };
@@ -878,7 +975,7 @@
     if (location.hash !== h) location.hash = h; else route();
   }
   function route() {
-    hidePopup();
+    hidePopup(); hideCard();
     const m = /^#\/f\/(\d+)(\/in)?/.exec(location.hash);
     if (m) showFunction(+m[1], m[2] ? "in" : "out"); else showOverview();
     main.scrollTop = 0;

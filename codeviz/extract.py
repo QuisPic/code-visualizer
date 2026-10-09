@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -36,6 +37,7 @@ class Function:
     kind: str = "function"  # function | method | constructor | toplevel
     calls: list[Call] = field(default_factory=list)
     receiver: str | None = None  # Go receiver variable, e.g. `s` in `func (s *Server) Start()`
+    doc: str = ""  # comment right above the definition, or a Python docstring
 
 
 @dataclass
@@ -50,6 +52,30 @@ class FileInfo:
 
 def _text(node: Node | None) -> str:
     return node.text.decode("utf-8", "replace") if node is not None else ""
+
+
+_DOC_MAX_LINES = 8
+_DOC_MAX_CHARS = 500
+_COMMENT_MARK = re.compile(r"^\s*(?:/\*+!?|\*+/|\*+(?!/)|//+!?|#+|--)\s?")
+
+
+def _clean_doc(lines: list[str]) -> str:
+    """Strip comment markers and blank edges; keep the first few lines."""
+    out = []
+    for line in lines:
+        line = _COMMENT_MARK.sub("", line.rstrip())
+        line = re.sub(r"\s*\*+/\s*$", "", line).rstrip()
+        out.append(line)
+    while out and not out[0].strip():
+        out.pop(0)
+    while out and not out[-1].strip():
+        out.pop()
+    # drop the common indent left after removing the markers
+    indent = min((len(l) - len(l.lstrip()) for l in out if l.strip()), default=0)
+    text = "\n".join(l[indent:] for l in out[:_DOC_MAX_LINES])
+    if len(out) > _DOC_MAX_LINES or len(text) > _DOC_MAX_CHARS:
+        text = text[:_DOC_MAX_CHARS].rstrip() + " …"
+    return text
 
 
 def _split_qualified(text: str) -> list[str]:
@@ -77,6 +103,42 @@ class _Extractor:
 
     def _code(self, start_row: int, end_row: int) -> str:
         return b"\n".join(self.lines[start_row:end_row + 1]).decode("utf-8", "replace")
+
+    def _leading_comment(self, row: int) -> str:
+        """The comment block that ends on the line right above `row` (0-based), if any."""
+        hash_comments = self.lang.family not in ("c",)  # `#include` / `#define` aren't comments in C
+        lines: list[str] = []
+        in_block = False
+        r = row - 1
+        while r >= 0 and len(lines) < 40:
+            text = self.lines[r].decode("utf-8", "replace").strip()
+            if in_block:
+                lines.append(text)
+                if text.startswith("/*"):
+                    in_block = False
+            elif text.endswith("*/"):
+                lines.append(text)
+                in_block = not text.startswith("/*")
+            elif text.startswith(("//", "--")) or (hash_comments and text.startswith("#") and not text.startswith("#!")):
+                lines.append(text)
+            elif text.startswith("@") and not lines:  # decorators / annotations sit between comment and def
+                pass
+            else:
+                break
+            r -= 1
+        return _clean_doc(lines[::-1]) if lines and not in_block else ""
+
+    def _docstring(self, node: Node) -> str:
+        body = node.child_by_field_name("body")
+        first = body.named_children[0] if body is not None and body.named_children else None
+        if first is not None and first.type == "expression_statement":  # older grammars wrap the string
+            first = first.named_children[0] if first.named_children else None
+        if first is None or first.type != "string":
+            return ""
+        text = _text(first)
+        text = re.sub(r'^[rRbBuUfF]*("""|\'\'\'|"|\')', "", text)
+        text = re.sub(r'("""|\'\'\'|"|\')$', "", text)
+        return _clean_doc(inspect.cleandoc(text).split("\n"))
 
     # ---- function naming -----------------------------------------------------------------
     def _c_declarator_name(self, node: Node | None) -> list[str] | None:
@@ -232,7 +294,10 @@ class _Extractor:
         # include a leading template<...> line for C++
         start_node = node.parent if node.parent is not None and node.parent.type == "template_declaration" else node
         start, end = start_node.start_point[0], node.end_point[0]
-        return Function(name, full_scope, self.path, self.lang, start + 1, end + 1, self._code(start, end), kind)
+        doc = self._docstring(node) if self.lang.name == "python" else ""
+        doc = doc or self._leading_comment(start)
+        return Function(name, full_scope, self.path, self.lang, start + 1, end + 1, self._code(start, end), kind,
+                        doc=doc)
 
     def run(self, root: Node) -> None:
         # iterative DFS: (node, scope, current function, inside-a-class flag)

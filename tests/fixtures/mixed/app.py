@@ -14,6 +14,9 @@ class Greeter:
 
 
 def format_greeting(name):
+    """Build the greeting text.
+
+    The name is cleaned first."""
     return "Hello " + helpers.clean(name)
 
 

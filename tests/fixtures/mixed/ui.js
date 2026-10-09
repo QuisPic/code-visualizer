@@ -6,6 +6,7 @@ class Counter {
   update() { render(this.count); }
 }
 
+// Create a counter and bump it once.
 const start = () => {
   const c = new Counter();
   c.increment();
