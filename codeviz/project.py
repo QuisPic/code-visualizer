@@ -12,6 +12,7 @@ import tempfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Callable
 
 from .extract import FileInfo, extract_file
 from .languages import BY_EXTENSION, Language
@@ -23,6 +24,8 @@ DEFAULT_EXCLUDES = [
     "*.min.js", "*.bundle.js", "*.map",
 ]
 MAX_FILE_BYTES = 1_000_000
+# keep git from flashing a console window when codeviz runs inside the windowed desktop app on Windows
+_NO_WINDOW = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
 
 
 def is_git_url(source: str) -> bool:
@@ -45,7 +48,7 @@ def checkout(source: str, ref: str | None = None):
         if ref:
             cmd += ["--branch", ref]
         print(f"cloning {source} ...", file=sys.stderr)
-        subprocess.run(cmd + [source, str(tmp / "repo")], check=True)
+        subprocess.run(cmd + [source, str(tmp / "repo")], check=True, **_NO_WINDOW)
         yield tmp / "repo"
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -56,7 +59,8 @@ _HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", re.MULTILINE)
 
 def _git(root: Path, *args: str) -> str | None:
     try:
-        res = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, errors="replace")
+        res = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, errors="replace",
+                             **_NO_WINDOW)
     except OSError:
         return None
     return res.stdout if res.returncode == 0 else None
@@ -128,7 +132,7 @@ def list_files(root: Path, excludes: list[str]) -> list[str]:
             found: set[str] = set()
             for args in (["--cached", "--recurse-submodules"], ["--others", "--exclude-standard"]):
                 out = subprocess.run(["git", "-C", str(root), "ls-files", "-z", *args],
-                                     capture_output=True, check=True).stdout
+                                     capture_output=True, check=True, **_NO_WINDOW).stdout
                 found.update(p for p in out.decode("utf-8", "replace").split("\0") if p)
             rels = list(found)
         except (subprocess.CalledProcessError, FileNotFoundError):
@@ -182,7 +186,7 @@ def source_link(root: Path) -> str | None:
     """URL template ({path}, {line}, {end}) pointing at the scanned commit on the repo's web host."""
     def git(*args: str) -> str:
         return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True,
-                              check=True).stdout.strip()
+                              check=True, **_NO_WINDOW).stdout.strip()
     try:
         remote, sha, prefix = git("remote", "get-url", "origin"), git("rev-parse", "HEAD"), git("rev-parse", "--show-prefix")
     except (subprocess.CalledProcessError, FileNotFoundError):
@@ -197,7 +201,8 @@ def source_link(root: Path) -> str | None:
 def churn(root: Path, since: str) -> dict[str, int]:
     """Number of commits since `since` (any `git log --since` date) that touched each file, relative to `root`."""
     def git(*args: str) -> str:
-        return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=True).stdout
+        return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=True,
+                              **_NO_WINDOW).stdout
     try:
         out = git("log", "--no-merges", f"--since={since}", "--format=%x00", "--name-only", "--relative", "--", ".")
     except (subprocess.CalledProcessError, FileNotFoundError):
@@ -211,12 +216,16 @@ def churn(root: Path, since: str) -> dict[str, int]:
 
 def build(root: Path, name: str, excludes: list[str], quiet: bool = False, changed_since: str | None = None,
           link: str | None = None,
-          churn_since: str | None = None) -> dict:
+          churn_since: str | None = None, progress: Callable[[int, int], None] | None = None) -> dict:
+    """`progress(done, total)` is called as files are parsed (the desktop app shows it)."""
     t0 = time.time()
     get_parser = _parsers()
     files: list[FileInfo] = []
     skipped = 0
-    for rel in list_files(root, excludes):
+    rels = list_files(root, excludes)
+    for n, rel in enumerate(rels):
+        if progress:
+            progress(n, len(rels))
         path = root / rel
         if path.stat().st_size > MAX_FILE_BYTES:
             skipped += 1
@@ -290,6 +299,7 @@ def build(root: Path, name: str, excludes: list[str], quiet: bool = False, chang
 def _commit_count(root: Path, since: str) -> int:
     try:
         return int(subprocess.run(["git", "-C", str(root), "rev-list", "--count", "--no-merges", f"--since={since}",
-                                   "HEAD", "--", "."], capture_output=True, text=True, check=True).stdout.strip())
+                                   "HEAD", "--", "."], capture_output=True, text=True, check=True,
+                                  **_NO_WINDOW).stdout.strip())
     except (subprocess.CalledProcessError, FileNotFoundError, ValueError):
         return 0
