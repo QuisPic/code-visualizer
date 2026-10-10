@@ -12,7 +12,8 @@ pytest                            # tests/test_codeviz.py, runs against tests/fi
 codeviz <dir-or-git-url> -o out.html [--json] [--open]   # or: python -m codeviz ...
 ```
 
-There is no linter, formatter config, JS build step or CI. Generated `*-codeviz.html` /
+There is no linter, formatter config or JS build step. CI (`.github/workflows/desktop.yml`) runs pytest
+and builds the desktop app on Windows and macOS. Generated `*-codeviz.html` /
 `*-codeviz.json` files are git-ignored; don't commit them.
 
 ## Pipeline
@@ -27,6 +28,7 @@ There is no linter, formatter config, JS build step or CI. Generated `*-codeviz.
 | `codeviz/extract.py` | walks a tree-sitter tree into `FileInfo` / `Function` / `Call` dataclasses; each file also gets a `(top level)` pseudo-function (`kind="toplevel"`) for module-level calls |
 | `codeviz/resolve.py` | `Resolver`: name-based call linking, no type inference. Candidates with the same name are scored (same class, qualifier match, same file, `.h`/`.cpp` pair, imports, directory distance); returns confidence `high` / `low` / `ambiguous`. Python and JS/TS imports (`FileInfo.bindings`) are checked first and link an imported name or `module.f()` to the file it came from |
 | `codeviz/render.py` | inlines `viewer/style.css`, `viewer/app.js` and the JSON into `viewer/index.html` placeholders (`/*__STYLE__*/`, `/*__APP__*/`, `/*__DATA__*/null`, `/*__DATA_GZ__*/`, `__TITLE__`), escaping `</` and `<!--`. JSON over 512 KB goes in gzipped + base64 (`DATA_GZ`) instead; `--no-compress` turns that off |
+| `codeviz/desktop/` | desktop app (`codeviz-app`): a pywebview window on a local HTTP server (`app.py`) serving `start.html` (folder picker, recent folders) and rendered viewer pages with `inject.js` added (Open… / Rescan buttons). Pages talk to the server over `api/...`, so `--browser` works without a window. Packaged with `packaging/` (PyInstaller spec, Inno Setup, bundled grammars from `fetch_grammars.py`); the packaged app's `--self-test` / `--smoke-test` run in CI |
 | `codeviz/viewer/` | the page: plain HTML/CSS/vanilla JS in one IIFE, no framework, no CDN, no build. `app.js` runs inside `codeviz(DATA)`, called by a loader in `index.html` once the data is ready (unpacked with `DecompressionStream` when gzipped) |
 
 ### Data format (`build()` output, the `DATA` global, `--json`)

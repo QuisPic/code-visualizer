@@ -12,12 +12,16 @@ dependencies = ["tree-sitter>=0.23", "tree-sitter-language-pack>=0.7"]
 
 [project.optional-dependencies]
 test = ["pytest>=7"]
+desktop = ["pywebview>=5"]
 
 [project.scripts]
 codeviz = "codeviz.cli:main"
 
+[project.gui-scripts]
+codeviz-app = "codeviz.desktop:main"
+
 [tool.setuptools]
-packages = ["codeviz"]
+packages = ["codeviz", "codeviz.desktop"]
 
 [tool.setuptools.package-data]
-codeviz = ["viewer/*"]
+codeviz = ["viewer/*", "desktop/*.html", "desktop/*.js"]

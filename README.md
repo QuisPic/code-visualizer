@@ -62,6 +62,30 @@ Open the generated `<name>-codeviz.html` in a browser. No server, no internet ne
   into each other folder, at a depth you pick. Folders are ordered callers-first, so amber cells
   below the diagonal stand out as folders that depend on each other. Click a cell to list the calls.
 
+## Desktop app (Windows and macOS)
+
+The desktop app does the same thing without a terminal: click **Open folder…**, pick a project, and the
+call graph opens in the app's window. Recently opened folders are listed on the start page, **↻ Rescan**
+picks up edits, and **📂 Open…** (Ctrl/⌘+O) switches to another folder. Everything runs locally and the
+grammars are bundled, so it works offline.
+
+Download it from the repository's **Releases** page, or from the artifacts of the latest
+[Desktop app](../../actions/workflows/desktop.yml) workflow run:
+
+| file | for |
+|---|---|
+| `codeviz-windows-x64-setup.exe` | Windows 10/11 installer (per user, no admin rights needed) |
+| `codeviz-windows-x64-portable.zip` | Windows, unzip and run `codeviz.exe` |
+| `codeviz-macos-arm64.dmg` | Apple Silicon Macs |
+| `codeviz-macos-x64.dmg` | Intel Macs |
+
+The builds aren't code-signed. On Windows, SmartScreen may say "Windows protected your PC": click
+**More info → Run anyway**. On macOS, drag codeviz to Applications, then the first time right-click it and
+choose **Open** (or run `xattr -dr com.apple.quarantine /Applications/codeviz.app`).
+
+From a checkout you can run it with `pip install -e '.[desktop]'` and `codeviz-app [folder]`; add
+`--browser` to use your web browser instead of a window (handy on Linux).
+
 ## Install
 
 Requires Python 3.10+ and git (only for git URLs).
@@ -143,3 +167,11 @@ pytest
 
 `codeviz/extract.py` finds functions and call sites, `codeviz/resolve.py` links them,
 `codeviz/viewer/` is the page (plain HTML/CSS/JS, inlined into the output by `codeviz/render.py`).
+`codeviz/desktop/` is the desktop app; `packaging/` and `.github/workflows/desktop.yml` build its installers
+(PyInstaller, Inno Setup on Windows, a .dmg on macOS). To build one locally:
+
+```
+pip install -e '.[desktop]' pyinstaller pillow
+python packaging/fetch_grammars.py build/grammars
+pyinstaller packaging/codeviz.spec --noconfirm     # -> dist/codeviz/ or dist/codeviz.app
+```
