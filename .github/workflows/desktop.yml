@@ -154,7 +154,8 @@ jobs:
           # Ubuntu 24.04+ blocks the user namespaces Qt WebEngine's sandbox needs (the app then opens the browser
           # instead); lift that here, as a user with an AppArmor profile or an older distro has it, to check the window
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          xvfb-run -a dist/codeviz-linux-x64.AppImage --smoke-test smoke.txt tests/fixtures/mixed || true
+          xvfb-run -a -s "-screen 0 1600x1000x24" dist/codeviz-linux-x64.AppImage --smoke-test smoke.txt \
+            tests/fixtures/mixed || echo "exit code $?"
           cat smoke.txt
           grep -qx ok smoke.txt
 
