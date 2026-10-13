@@ -331,27 +331,15 @@ def run_in_browser(url: str) -> int:
 
 
 def linux_sandbox_problem() -> str:
-    """Why Qt WebEngine's Chromium sandbox can't start on this Linux system, or "" when it can.
+    """Why Qt WebEngine can't start on this Linux system, or "" when it can.
 
-    The sandbox needs unprivileged user namespaces, which some distros block for apps without an AppArmor
-    profile (Ubuntu 24.04+), and Chromium refuses to run as root. Qt WebEngine then aborts, so the app opens
-    the user's browser instead. Setting QTWEBENGINE_DISABLE_SANDBOX=1 yourself forces the window.
+    Its Chromium refuses to run as root with the sandbox on and aborts, so the app opens the user's browser
+    instead. Setting QTWEBENGINE_DISABLE_SANDBOX=1 yourself forces the window.
     """
     if os.environ.get("PYWEBVIEW_GUI") != "qt" or os.environ.get("QTWEBENGINE_DISABLE_SANDBOX") \
             or "--no-sandbox" in os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", ""):
         return ""
-
-    def sysctl(name: str) -> str:
-        try:
-            return Path("/proc/sys/kernel", name).read_text().strip()
-        except OSError:
-            return ""
-
-    if os.geteuid() == 0:
-        return "running as root"
-    if sysctl("apparmor_restrict_unprivileged_userns") == "1" or sysctl("unprivileged_userns_clone") == "0":
-        return "unprivileged user namespaces are restricted"
-    return ""
+    return "running as root" if os.geteuid() == 0 else ""
 
 
 def smoke_test(window, result_file: str, result: list[str]) -> None:
