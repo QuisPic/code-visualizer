@@ -66,12 +66,11 @@ no `t` is external. `stats` holds counts; with `--churn`, `churn: {since, commit
 
 ## Testing against a real repo
 
-The real-world test target is the private repo **QuisPic/3d-surface** (C++ After Effects plugin,
-ExtendScript `.jsx`, some Python). Its `engine` submodule (QuisPic/plugin-engine) is not
-cloned by default. After a change to extraction, resolution or the viewer, regenerate and open it:
+Pytest only uses small fixtures, so after a change to extraction, resolution or the viewer, also run
+codeviz on a real, mid-sized repo (for example flask, express or redis) and open the page:
 
 ```
-codeviz /path/to/3d-surface -o 3d-surface-codeviz.html
+codeviz /path/to/some-repo -o some-repo-codeviz.html
 ```
 
 Check the printed `files / functions / calls (linked)` summary against the previous run, then
