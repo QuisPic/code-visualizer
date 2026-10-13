@@ -1,5 +1,7 @@
 # codeviz
 
+![codeviz: function tree on the left, call graph on the right](docs/screenshot.png)
+
 Turn a codebase into one self-contained HTML page where you can browse every function as a tree
 and click through from a function to the functions it calls (and back to its callers).
 
