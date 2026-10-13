@@ -175,3 +175,8 @@ pip install -e '.[desktop]' pyinstaller pillow
 python packaging/fetch_grammars.py build/grammars
 pyinstaller packaging/codeviz.spec --noconfirm     # -> dist/codeviz/ or dist/codeviz.app
 ```
+
+## License
+
+MIT, see [LICENSE](LICENSE). The desktop app bundles Python, pywebview and the tree-sitter grammars from
+`tree-sitter-language-pack`, which keep their own licenses.
