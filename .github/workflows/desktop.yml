@@ -148,11 +148,11 @@ jobs:
           # drivers; every desktop has it, a bare runner doesn't
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends xvfb libegl1 libgl1 libgbm1 libdrm2 libxcb-dri3-0 \
-            libwayland-client0 libwayland-server0 libwayland-cursor0 libwayland-egl1
+            libwayland-client0 libwayland-server0 libwayland-cursor0 libwayland-egl1 libgl1-mesa-dri
           chmod +x dist/codeviz-linux-x64.AppImage
           dist/codeviz-linux-x64.AppImage --self-test
           sysctl kernel.apparmor_restrict_unprivileged_userns || true
-          xvfb-run -a dist/codeviz-linux-x64.AppImage --smoke-test smoke.txt tests/fixtures/mixed || true
+          xvfb-run -a dist/codeviz-linux-x64.AppImage --smoke-test smoke.txt tests/fixtures/mixed || echo "exit $?"
           cat smoke.txt || true
 
   release:
