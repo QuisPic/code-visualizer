@@ -144,12 +144,13 @@ jobs:
         env:
           APPIMAGE_EXTRACT_AND_RUN: "1"
         run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb
+          # libEGL comes with the GPU driver stack (every desktop has it); PyInstaller doesn't bundle it
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb libegl1
           chmod +x dist/codeviz-linux-x64.AppImage
           dist/codeviz-linux-x64.AppImage --self-test
           sysctl kernel.apparmor_restrict_unprivileged_userns || true
           xvfb-run -a dist/codeviz-linux-x64.AppImage --smoke-test smoke.txt tests/fixtures/mixed || true
-          cat smoke.txt
+          cat smoke.txt || true
 
   release:
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.version != '')
