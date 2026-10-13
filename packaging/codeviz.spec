@@ -32,7 +32,10 @@ if LINUX:
         r"|QuickShapes|QuickLayouts|Multimedia|Pdf|PositioningQuick|RemoteObjects|Sensors|SerialPort|ShaderTools"
         r"|SpatialAudio|StateMachine|Test|TextToSpeech|WebChannelQuick|WebEngineQuick|WebSockets)"
         r"|plugins/imageformats/libqpdf|plugins/position/libqtposition_nmea)"
-        r"|lib(gtk-3|gdk-3|gdk_pixbuf-2\.0|atk-1\.0|atk-bridge-2\.0|atspi|cairo-gobject|epoxy)\.so")
+        r"|lib(gtk-3|gdk-3|gdk_pixbuf-2\.0|atk-1\.0|atk-bridge-2\.0|atspi|cairo-gobject|epoxy)\.so"
+        # Libraries the system's graphics drivers and fonts load too: a copy from the (older) build machine
+        # breaks them on newer distros, and every desktop has them (as AppImage's excludelist says).
+        r"|lib(stdc\+\+|gcc_s|gbm|drm|X11|X11-xcb|xcb|xcb-glx|xcb-dri[23]|fontconfig|freetype)\.so")
     a.binaries = [b for b in a.binaries if not unused.match(b[0])]
     a.datas = [d for d in a.datas if not unused.match(d[0])]
 pyz = PYZ(a.pure)
