@@ -9,7 +9,7 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 
 ROOT = Path(SPECPATH).parent
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 LINUX = sys.platform.startswith("linux")
 
 datas = collect_data_files("codeviz") + [(str(ROOT / "build" / "grammars"), "grammars")]

@@ -1,9 +1,9 @@
 ; Inno Setup script for the codeviz Windows installer. Built in CI after PyInstaller:
-;   iscc /DAppVersion=0.1.0 packaging\windows.iss   ->  dist\codeviz-setup.exe
+;   iscc /DAppVersion=0.2.0 packaging\windows.iss   ->  dist\codeviz-setup.exe
 ; Installs per user (no admin prompt) into %LOCALAPPDATA%\Programs\codeviz.
 
 #ifndef AppVersion
-  #define AppVersion "0.1.0"
+  #define AppVersion "0.2.0"
 #endif
 
 [Setup]
