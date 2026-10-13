@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=codeviz
+Comment=Browse a codebase as a clickable call graph
+Exec=codeviz %f
+Icon=codeviz
+Terminal=false
+Categories=Development;

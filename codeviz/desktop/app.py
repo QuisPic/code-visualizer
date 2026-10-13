@@ -285,14 +285,17 @@ def main(argv: list[str] | None = None) -> int:
     if args.folder:
         url += "#open=" + quote(str(Path(args.folder).expanduser().resolve()), safe="")
 
+    if sys.platform.startswith("linux") and not args.browser:
+        if getattr(sys, "frozen", False):
+            os.environ.setdefault("PYWEBVIEW_GUI", "qt")  # the packaged app bundles Qt WebEngine, not GTK
+        reason = linux_sandbox_problem()
+        if reason and not args.smoke_test:
+            print(f"codeviz: the app window can't start here ({reason}); using the web browser instead",
+                  file=sys.stderr)
+            args.browser = True
+
     if args.browser:
-        print(f"codeviz is running at {url}  (Ctrl+C to stop)")
-        webbrowser.open(url)
-        try:
-            threading.Event().wait()
-        except KeyboardInterrupt:
-            pass
-        return 0
+        return run_in_browser(url)
 
     import webview
 
@@ -305,9 +308,50 @@ def main(argv: list[str] | None = None) -> int:
     result: list[str] = []
     if args.smoke_test:
         threading.Thread(target=smoke_test, args=(app.window, args.smoke_test, result), daemon=True).start()
-    webview.start(private_mode=False, storage_path=str(storage))
+    try:
+        webview.start(private_mode=False, storage_path=str(storage))
+    except webview.errors.WebViewException as exc:  # no Qt or GTK web view (Linux without them installed)
+        if args.smoke_test:
+            raise
+        print(f"codeviz: can't open a window ({exc}); using the web browser instead", file=sys.stderr)
+        app.window = None
+        return run_in_browser(url)
     server.shutdown()
     return 0 if not args.smoke_test or result == ["ok"] else 1
+
+
+def run_in_browser(url: str) -> int:
+    print(f"codeviz is running at {url}  (Ctrl+C to stop)")
+    webbrowser.open(url)
+    try:
+        threading.Event().wait()
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
+def linux_sandbox_problem() -> str:
+    """Why Qt WebEngine's Chromium sandbox can't start on this Linux system, or "" when it can.
+
+    The sandbox needs unprivileged user namespaces, which some distros block for apps without an AppArmor
+    profile (Ubuntu 24.04+), and Chromium refuses to run as root. Qt WebEngine then aborts, so the app opens
+    the user's browser instead. Setting QTWEBENGINE_DISABLE_SANDBOX=1 yourself forces the window.
+    """
+    if os.environ.get("PYWEBVIEW_GUI") != "qt" or os.environ.get("QTWEBENGINE_DISABLE_SANDBOX") \
+            or "--no-sandbox" in os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", ""):
+        return ""
+
+    def sysctl(name: str) -> str:
+        try:
+            return Path("/proc/sys/kernel", name).read_text().strip()
+        except OSError:
+            return ""
+
+    if os.geteuid() == 0:
+        return "running as root"
+    if sysctl("apparmor_restrict_unprivileged_userns") == "1" or sysctl("unprivileged_userns_clone") == "0":
+        return "unprivileged user namespaces are restricted"
+    return ""
 
 
 def smoke_test(window, result_file: str, result: list[str]) -> None:
