@@ -151,9 +151,12 @@ jobs:
             libwayland-client0 libwayland-server0 libwayland-cursor0 libwayland-egl1 libgl1-mesa-dri
           chmod +x dist/codeviz-linux-x64.AppImage
           dist/codeviz-linux-x64.AppImage --self-test
-          sysctl kernel.apparmor_restrict_unprivileged_userns || true
-          xvfb-run -a dist/codeviz-linux-x64.AppImage --smoke-test smoke.txt tests/fixtures/mixed || echo "exit $?"
-          cat smoke.txt || true
+          # Ubuntu 24.04+ blocks the user namespaces Qt WebEngine's sandbox needs (the app then opens the browser
+          # instead); lift that here, as a user with an AppArmor profile or an older distro has it, to check the window
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          xvfb-run -a dist/codeviz-linux-x64.AppImage --smoke-test smoke.txt tests/fixtures/mixed || true
+          cat smoke.txt
+          grep -qx ok smoke.txt
 
   release:
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.version != '')
