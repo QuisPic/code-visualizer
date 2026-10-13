@@ -2,7 +2,7 @@
 
 ![codeviz: explorer tree on the left, call graph in the middle, source on the right](docs/screenshot.png)
 
-A desktop app for Windows and macOS that maps a codebase as a browsable tree of every function and lets you
+A desktop app for Windows, macOS and Linux that maps a codebase as a browsable tree of every function and lets you
 click through from a function to the functions it calls (and back to its callers).
 
 Click **Open folder…**, pick a project, and its call graph opens in the app's window. Recently opened folders
@@ -20,13 +20,16 @@ Get the latest build from the repository's **Releases** page, or from the artifa
 | `codeviz-windows-x64-portable.zip` | Windows, unzip and run `codeviz.exe` |
 | `codeviz-macos-arm64.dmg` | Apple Silicon Macs |
 | `codeviz-macos-x64.dmg` | Intel Macs |
+| `codeviz-linux-x64.AppImage` | Linux x64 (Ubuntu 22.04 or newer, or a distro of the same age): `chmod +x` it and run it |
+| `codeviz-linux-x64.tar.gz` | Linux x64, unpack and run `codeviz/codeviz` |
 
 The builds aren't code-signed. On Windows, SmartScreen may say "Windows protected your PC": click
 **More info → Run anyway**. On macOS, drag codeviz to Applications, then the first time right-click it and
-choose **Open** (or run `xattr -dr com.apple.quarantine /Applications/codeviz.app`).
+choose **Open** (or run `xattr -dr com.apple.quarantine /Applications/codeviz.app`). If the AppImage won't
+start with a FUSE error, install `libfuse2` (or run it with `--appimage-extract-and-run`).
 
-On Linux, or to run from a checkout: `pip install -e '.[desktop]'`, then `codeviz-app [folder]`. Add
-`--browser` to use your web browser instead of a window.
+To run from a checkout: `pip install -e '.[desktop]'`, then `codeviz-app [folder]`. Add `--browser` to use
+your web browser instead of a window.
 
 ## What you get
 
@@ -172,15 +175,16 @@ pytest
 `codeviz/viewer/` is the UI (plain HTML/CSS/JS; `codeviz/render.py` inlines it into one page,
 which the app serves and the CLI writes to a file).
 `codeviz/desktop/` is the desktop app; `packaging/` and `.github/workflows/desktop.yml` build its installers
-(PyInstaller, Inno Setup on Windows, a .dmg on macOS). To build one locally:
+(PyInstaller, Inno Setup on Windows, a .dmg on macOS, an AppImage on Linux via
+`packaging/linux/build-appimage.sh`). To build one locally:
 
 ```
 pip install -e '.[desktop]' pyinstaller pillow
 python packaging/fetch_grammars.py build/grammars
-pyinstaller packaging/codeviz.spec --noconfirm     # -> dist/codeviz/ or dist/codeviz.app
+pyinstaller packaging/codeviz.spec --noconfirm     # -> dist/codeviz/ (Windows, Linux) or dist/codeviz.app
 ```
 
 ## License
 
 MIT, see [LICENSE](LICENSE). The desktop app bundles Python, pywebview and the tree-sitter grammars from
-`tree-sitter-language-pack`, which keep their own licenses.
+`tree-sitter-language-pack`, and on Linux Qt and PyQt6 (LGPL / GPL v3), which keep their own licenses.
