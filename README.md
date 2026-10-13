@@ -2,15 +2,31 @@
 
 ![codeviz: explorer tree on the left, call graph in the middle, source on the right](docs/screenshot.png)
 
-Turn a codebase into one self-contained HTML page where you can browse every function as a tree
-and click through from a function to the functions it calls (and back to its callers).
+A desktop app for Windows and macOS that maps a codebase as a browsable tree of every function and lets you
+click through from a function to the functions it calls (and back to its callers).
 
-```
-codeviz ~/src/my-project            # a local directory
-codeviz https://github.com/me/repo  # or any git URL (shallow-cloned to a temp dir)
-```
+Click **Open folder…**, pick a project, and its call graph opens in the app's window. Recently opened folders
+are listed on the start page, **↻ Rescan** picks up edits, and **📂 Open…** (Ctrl/⌘+O) switches to another
+folder. Everything runs locally and the language grammars are bundled, so it works offline.
 
-Open the generated `<name>-codeviz.html` in a browser. No server, no internet needed.
+## Download
+
+Get the latest build from the repository's **Releases** page, or from the artifacts of the latest
+[Desktop app](../../actions/workflows/desktop.yml) workflow run:
+
+| file | for |
+|---|---|
+| `codeviz-windows-x64-setup.exe` | Windows 10/11 installer (per user, no admin rights needed) |
+| `codeviz-windows-x64-portable.zip` | Windows, unzip and run `codeviz.exe` |
+| `codeviz-macos-arm64.dmg` | Apple Silicon Macs |
+| `codeviz-macos-x64.dmg` | Intel Macs |
+
+The builds aren't code-signed. On Windows, SmartScreen may say "Windows protected your PC": click
+**More info → Run anyway**. On macOS, drag codeviz to Applications, then the first time right-click it and
+choose **Open** (or run `xattr -dr com.apple.quarantine /Applications/codeviz.app`).
+
+On Linux, or to run from a checkout: `pip install -e '.[desktop]'`, then `codeviz-app [folder]`. Add
+`--browser` to use your web browser instead of a window.
 
 ## What you get
 
@@ -40,7 +56,7 @@ Open the generated `<name>-codeviz.html` in a browser. No server, no internet ne
   on each step highlighted in the source.
 - **Bookmarks and recent**: star a function (☆ next to its name, or press `B`) to keep it at the top
   of the sidebar, under a list of recently visited functions. Both are remembered per project, even
-  after you regenerate the page.
+  after a rescan.
 - **Call sites**: switch the source pane to *Call sites* to see every line that calls the function, with a
   line of context on each side and the call highlighted, grouped by caller. Click one to open that caller.
 - **Code search**: in the search box, press `Shift+Enter` (or pick *Search code for…*) to list every line
@@ -52,7 +68,7 @@ Open the generated `<name>-codeviz.html` in a browser. No server, no internet ne
 - **Search** (`/` or `Ctrl+K`): fuzzy, like an editor's file finder: `gms` finds `getMaterialState`,
   several words narrow it down (`surface flat`), and file names are listed too (picking one opens it in
   the Explorer).
-- Back/forward (`Alt+←/→` or the browser buttons; every view has its own URL), light/dark theme,
+- Back/forward (`Alt+←/→` or the ← → buttons in the top bar), light/dark theme,
   and an overview page with a **codebase map** (a treemap of folders and files sized by lines,
   coloured by language or by how much other files call into them; click a folder to zoom in, a file
   to list its functions), entry points, the most-called functions, **call cycles** (groups of mutually
@@ -64,31 +80,16 @@ Open the generated `<name>-codeviz.html` in a browser. No server, no internet ne
   into each other folder, at a depth you pick. Folders are ordered callers-first, so amber cells
   below the diagonal stand out as folders that depend on each other. Click a cell to list the calls.
 
-## Desktop app (Windows and macOS)
+## Command line: export an HTML page
 
-The desktop app does the same thing without a terminal: click **Open folder…**, pick a project, and the
-call graph opens in the app's window. Recently opened folders are listed on the start page, **↻ Rescan**
-picks up edits, and **📂 Open…** (Ctrl/⌘+O) switches to another folder. Everything runs locally and the
-grammars are bundled, so it works offline.
+The `codeviz` command does the same scan and writes the result as **one self-contained HTML page** you can
+open in any browser or share, with no server and no internet needed. It also takes git URLs and has a few
+options the app doesn't (marking changes on a branch, churn hotspots).
 
-Download it from the repository's **Releases** page, or from the artifacts of the latest
-[Desktop app](../../actions/workflows/desktop.yml) workflow run:
-
-| file | for |
-|---|---|
-| `codeviz-windows-x64-setup.exe` | Windows 10/11 installer (per user, no admin rights needed) |
-| `codeviz-windows-x64-portable.zip` | Windows, unzip and run `codeviz.exe` |
-| `codeviz-macos-arm64.dmg` | Apple Silicon Macs |
-| `codeviz-macos-x64.dmg` | Intel Macs |
-
-The builds aren't code-signed. On Windows, SmartScreen may say "Windows protected your PC": click
-**More info → Run anyway**. On macOS, drag codeviz to Applications, then the first time right-click it and
-choose **Open** (or run `xattr -dr com.apple.quarantine /Applications/codeviz.app`).
-
-From a checkout you can run it with `pip install -e '.[desktop]'` and `codeviz-app [folder]`; add
-`--browser` to use your web browser instead of a window (handy on Linux).
-
-## Install
+```
+codeviz ~/src/my-project            # a local directory -> my-project-codeviz.html
+codeviz https://github.com/me/repo  # or any git URL (shallow-cloned to a temp dir)
+```
 
 Requires Python 3.10+ and git (only for git URLs).
 
@@ -101,7 +102,7 @@ pip install -e .
 Parsing uses [tree-sitter](https://tree-sitter.github.io/) through `tree-sitter-language-pack`,
 which downloads each language's grammar the first time it is needed.
 
-## Options
+### Options
 
 ```
 codeviz SOURCE [-o OUT.html] [--ref BRANCH] [--name NAME] [-x GLOB ...] [--no-default-excludes] [--changed-since REF] [--json] [--no-compress] [--link TEMPLATE | --no-link] [--churn [SINCE]] [--open]
@@ -123,7 +124,7 @@ codeviz SOURCE [-o OUT.html] [--ref BRANCH] [--name NAME] [-x GLOB ...] [--no-de
 
 In a git work tree, files ignored by `.gitignore` are skipped and checked-out submodules are included.
 
-### Reviewing a branch
+#### Reviewing a branch
 
 `codeviz . --changed-since main` marks every function the branch adds (green) or modifies (amber), measured from where the branch left `main` and including uncommitted edits. Dots in the explorer lead to them, changed nodes carry a dot in the graph, and the overview lists them ranked by how many functions can reach them, so you can see what a change can affect.
 
@@ -147,7 +148,7 @@ In Python and JavaScript/TypeScript, imports are followed first: `from .util imp
 straight to the file it was imported from. A Python call into a library (`json.dumps`,
 `from werkzeug.utils import send_file`) stays external even if the project has a function with that name.
 
-In the page:
+In the graph:
 
 - solid links are confident,
 - **dashed** links (“guess”) were matched by name only. Untick *guesses* to hide them,
@@ -168,7 +169,8 @@ pytest
 ```
 
 `codeviz/extract.py` finds functions and call sites, `codeviz/resolve.py` links them,
-`codeviz/viewer/` is the page (plain HTML/CSS/JS, inlined into the output by `codeviz/render.py`).
+`codeviz/viewer/` is the UI (plain HTML/CSS/JS; `codeviz/render.py` inlines it into one page,
+which the app serves and the CLI writes to a file).
 `codeviz/desktop/` is the desktop app; `packaging/` and `.github/workflows/desktop.yml` build its installers
 (PyInstaller, Inno Setup on Windows, a .dmg on macOS). To build one locally:
 
