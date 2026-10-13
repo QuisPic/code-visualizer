@@ -144,8 +144,11 @@ jobs:
         env:
           APPIMAGE_EXTRACT_AND_RUN: "1"
         run: |
-          # libEGL comes with the GPU driver stack (every desktop has it); PyInstaller doesn't bundle it
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb libegl1
+          # PyInstaller leaves out the graphics stack (GL, EGL, DRM, Wayland), which must match the system's
+          # drivers; every desktop has it, a bare runner doesn't
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb libegl1 libgl1 libgbm1 libdrm2 libxcb-dri3-0 \
+            libwayland-client0 libwayland-server0 libwayland-cursor0 libwayland-egl1
           chmod +x dist/codeviz-linux-x64.AppImage
           dist/codeviz-linux-x64.AppImage --self-test
           sysctl kernel.apparmor_restrict_unprivileged_userns || true
