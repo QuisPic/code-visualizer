@@ -26,7 +26,7 @@ Get the latest build from the repository's **Releases** page, or from the artifa
 The builds aren't code-signed. On Windows, SmartScreen may say "Windows protected your PC": click
 **More info → Run anyway**. On macOS, drag codeviz to Applications, then the first time right-click it and
 choose **Open** (or run `xattr -dr com.apple.quarantine /Applications/codeviz.app`). If the AppImage won't
-start with a FUSE error, install `libfuse2` (or run it with `--appimage-extract-and-run`).
+start with a FUSE error, install FUSE (`fuse3` on most distros) or run it with `--appimage-extract-and-run`.
 
 To run from a checkout: `pip install -e '.[desktop]'`, then `codeviz-app [folder]`. Add `--browser` to use
 your web browser instead of a window.
