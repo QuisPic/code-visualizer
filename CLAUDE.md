@@ -13,7 +13,7 @@ codeviz <dir-or-git-url> -o out.html [--json] [--open]   # or: python -m codeviz
 ```
 
 There is no linter, formatter config or JS build step. CI (`.github/workflows/desktop.yml`) runs pytest
-and builds the desktop app on Windows and macOS. Generated `*-codeviz.html` /
+and builds the desktop app on Windows, macOS and Linux (an AppImage with a Qt web view). Generated `*-codeviz.html` /
 `*-codeviz.json` files are git-ignored; don't commit them.
 
 ## Pipeline

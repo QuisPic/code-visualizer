@@ -14,7 +14,7 @@ dependencies = ["tree-sitter>=0.23", "tree-sitter-language-pack>=0.7"]
 
 [project.optional-dependencies]
 test = ["pytest>=7"]
-desktop = ["pywebview>=5"]
+desktop = ["pywebview>=5", "pywebview[qt]>=5; sys_platform == 'linux'"]  # Qt: pip can't install GTK's bindings
 
 [project.scripts]
 codeviz = "codeviz.cli:main"
